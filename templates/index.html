@@ -1,0 +1,1085 @@
+{% extends "base.html" %}
+
+{% block title %}HydroScan{% endblock %}
+
+{# ──────────────────────────────────────────────────────────────────────────
+   Macro: section header badge + title
+   ────────────────────────────────────────────────────────────────────────── #}
+{% macro section_label(number, title, subtitle="") %}
+<div class="flex items-center gap-4 mb-6">
+  <span class="font-mono text-xs font-bold text-surface-900 bg-accent px-2 py-0.5 rounded select-none">{{ number }}</span>
+  <div>
+    <h2 class="text-base font-semibold tracking-wide text-gray-100">{{ title }}</h2>
+    {% if subtitle %}
+    <p class="text-xs text-text-dim mt-0.5">{{ subtitle }}</p>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{% block extra_head %}
+<script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>
+{% endblock %}
+
+{% block content %}
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 1 — Protein Upload
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section id="section-upload" class="rounded-xl border border-surface-700 bg-surface-800 p-8">
+
+  {{ section_label("01", "Protein Upload", "Load your protein structure in PDB format (max 100 MB)") }}
+
+  <!-- Drop zone -->
+  <div
+    id="drop-zone"
+    class="relative flex flex-col items-center justify-center gap-4
+           rounded-lg border-2 border-dashed border-surface-700
+           bg-surface-900/60 px-8 py-14 cursor-pointer select-none
+           transition-all duration-300 hover:border-accent/60 hover:bg-surface-900"
+    role="button" aria-label="PDB file drop zone" tabindex="0"
+  >
+    <div id="drop-glow"
+      class="pointer-events-none absolute inset-0 rounded-lg opacity-0 transition-opacity duration-300"
+      style="background:radial-gradient(ellipse at center,rgba(245,158,11,.07) 0%,transparent 70%);"></div>
+    <svg id="drop-icon" class="h-12 w-12 text-surface-700 transition-colors duration-300"
+         viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M8 32V36a4 4 0 004 4h24a4 4 0 004-4v-4" stroke-linecap="round"/>
+      <path d="M24 8v24M16 16l8-8 8 8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="text-center">
+      <p id="drop-label" class="font-medium text-gray-300 text-sm">
+        Drop your <span class="font-mono text-accent">.pdb</span> file here
+      </p>
+      <p class="text-xs text-text-dim mt-1">or click to browse the file system</p>
+    </div>
+    <input id="file-input" type="file" accept=".pdb"
+           class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" aria-hidden="true"/>
+  </div>
+
+  <!-- File info strip -->
+  <div id="file-info" class="hidden mt-4 flex items-center gap-3 rounded-lg border border-surface-700 bg-surface-900/50 px-4 py-3">
+    <svg class="h-4 w-4 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+    </svg>
+    <div class="flex-1 min-w-0">
+      <p id="file-name" class="font-mono text-xs text-accent truncate"></p>
+      <p id="file-size" class="text-xs text-text-dim mt-0.5"></p>
+    </div>
+    <button id="clear-file-btn" class="text-text-dim hover:text-gray-100 transition-colors p-1 rounded"
+            aria-label="Clear selection" title="Clear selection">
+      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Progress bar -->
+  <div id="progress-container" class="hidden mt-5 space-y-2">
+    <div class="flex justify-between items-center text-xs">
+      <span id="progress-label" class="text-text-dim font-mono">Uploading…</span>
+      <span id="progress-pct" class="font-mono text-accent">0%</span>
+    </div>
+    <div class="h-1.5 w-full rounded-full bg-surface-700 overflow-hidden">
+      <div id="progress-bar" class="h-full rounded-full bg-accent transition-all duration-100 ease-out"
+           style="width:0%" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    </div>
+  </div>
+
+  <!-- Action row -->
+  <div class="mt-6 flex items-center gap-4">
+    <button id="upload-btn" disabled
+      class="flex items-center gap-2 rounded-lg px-6 py-2.5 bg-accent text-surface-900
+             font-semibold text-sm transition-all duration-200
+             disabled:opacity-30 disabled:cursor-not-allowed
+             enabled:hover:bg-accent-dim enabled:active:scale-95 enabled:shadow-amber-glow">
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <span id="upload-btn-text">Process PDB</span>
+    </button>
+    <div id="status-badge" class="hidden items-center gap-2 font-mono text-xs">
+      <span id="status-dot" class="inline-block h-2 w-2 rounded-full bg-accent animate-pulse"></span>
+      <span id="status-text" class="text-text-dim"></span>
+    </div>
+  </div>
+
+  <!-- Banners -->
+  <div id="error-box" class="hidden mt-4 rounded-lg border border-red-900/60 bg-red-950/30 px-4 py-3" role="alert">
+    <p class="text-xs font-mono text-red-400 leading-relaxed" id="error-text"></p>
+  </div>
+  <div id="tleap-warn-box" class="hidden mt-4 rounded-lg border border-yellow-900/60 bg-yellow-950/20 px-4 py-3">
+    <div class="flex items-start gap-2">
+      <svg class="h-3.5 w-3.5 text-yellow-500 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <p class="text-xs font-mono text-yellow-400 leading-relaxed" id="tleap-warn-text"></p>
+    </div>
+  </div>
+  <div id="success-box" class="hidden mt-4 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 space-y-1">
+    <p class="text-xs text-text-dim font-mono">File processed successfully</p>
+    <p class="text-xs font-mono text-accent" id="success-run-id"></p>
+  </div>
+
+</section>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SECTION 2 — Study Configuration, 3D Viewer & Residue Selection
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section
+  id="section-study"
+  class="relative rounded-xl border border-surface-700 bg-surface-800 p-8 transition-all duration-700"
+  aria-disabled="true" data-locked="true"
+>
+
+  <!-- Lock overlay -->
+  <div id="section-study-lock"
+    class="absolute inset-0 rounded-xl z-10 flex flex-col items-center justify-center gap-3
+           backdrop-blur-[2px] bg-surface-900/70 border border-surface-700"
+    style="transition: opacity .7s ease, backdrop-filter .7s ease;">
+    <svg class="h-8 w-8 text-surface-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+      <path d="M7 11V7a5 5 0 0110 0v4"/>
+    </svg>
+    <p class="font-mono text-xs text-text-dim tracking-wider">Locked — process a PDB first</p>
+  </div>
+
+  <!-- Inner content -->
+  <div id="section-study-inner" class="opacity-20 pointer-events-none select-none">
+
+    {{ section_label("02", "Study Configuration & Residue Selection",
+       "Set metadata, inspect the 3D structure, and configure charge scaling") }}
+
+    <!-- Metadata inputs -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+      <div class="flex flex-col gap-1.5">
+        <label for="input-study-name" class="text-xs font-medium text-text-dim tracking-wide uppercase">
+          Study Name <span class="text-red-400">*</span>
+        </label>
+        <input id="input-study-name" type="text" autocomplete="off"
+               placeholder="e.g. Lysozyme Hydrophobicity Study"
+               class="rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-sm
+                      text-gray-100 placeholder:text-surface-700
+                      focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30 transition-colors"/>
+        <p class="text-xs text-red-400 hidden" id="study-name-err">This field is required.</p>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="input-folder-name" class="text-xs font-medium text-text-dim tracking-wide uppercase">
+          Server Folder Name <span class="text-red-400">*</span>
+        </label>
+        <div class="relative">
+          <input id="input-folder-name" type="text" autocomplete="off"
+                 placeholder="e.g. lysozyme_study_01"
+                 class="w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-sm
+                        font-mono text-gray-100 placeholder:text-surface-700
+                        focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30 transition-colors"/>
+          <span id="folder-auto-badge"
+                class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-xs font-mono text-accent/60 bg-surface-800 px-1 rounded">auto</span>
+        </div>
+        <p class="text-xs text-red-400 hidden" id="folder-name-err">This field is required.</p>
+      </div>
+    </div>
+
+    <div class="border-t border-surface-700 mb-8"></div>
+
+    <!-- ── Two-column: 3D viewer | Residue panel ─────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- LEFT — 3D Viewer -->
+      <div class="flex flex-col gap-3">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <h3 class="text-sm font-medium text-gray-300">3D Structure Viewer</h3>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs text-text-dim font-mono hidden sm:inline">drag=rotate · scroll=zoom · right-drag=pan</span>
+            <div class="flex gap-1" id="repr-toggle-group">
+              <button data-repr="cartoon"
+                class="repr-btn font-mono text-xs px-2 py-1 rounded bg-accent text-surface-900 transition-all duration-150"
+                title="Cartoon">Cartoon</button>
+              <button data-repr="ball+stick"
+                class="repr-btn font-mono text-xs px-2 py-1 rounded bg-surface-700 text-text-dim hover:bg-surface-700/70 transition-all duration-150"
+                title="Ball and Stick">Ball+Stick</button>
+              <button data-repr="surface"
+                class="repr-btn font-mono text-xs px-2 py-1 rounded bg-surface-700 text-text-dim hover:bg-surface-700/70 transition-all duration-150"
+                title="Surface">Surface</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="ngl-container"
+          class="relative w-full rounded-lg border border-surface-700 bg-surface-900 overflow-hidden"
+          style="height:420px;">
+          <div id="ngl-loading"
+            class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-900 z-10">
+            <div class="h-6 w-6 rounded-full border-2 border-surface-700 border-t-accent animate-spin"></div>
+            <p class="font-mono text-xs text-text-dim">Loading structure…</p>
+          </div>
+          <div id="ngl-error"
+            class="absolute inset-0 hidden flex-col items-center justify-center gap-2 bg-surface-900 z-10">
+            <svg class="h-6 w-6 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <p class="font-mono text-xs text-red-400 text-center px-4" id="ngl-error-text">Failed to load structure.</p>
+          </div>
+        </div>
+
+        <div id="tleap-status-pill" class="flex items-center gap-2">
+          <span class="inline-block h-2 w-2 rounded-full bg-surface-700" id="tleap-pill-dot"></span>
+          <span class="font-mono text-xs text-text-dim" id="tleap-pill-text">Awaiting processing…</span>
+        </div>
+      </div>
+
+      <!-- RIGHT — Residue Selection Panel -->
+      <div class="flex flex-col gap-4">
+        <h3 class="text-sm font-medium text-gray-300">Residue Selection &amp; Charge Scaling</h3>
+
+        <!-- Residue count info card -->
+        <div class="rounded-lg border border-surface-700 bg-surface-900/60 px-4 py-3 flex items-start gap-3">
+          <svg class="h-4 w-4 text-accent mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <div>
+            <p class="text-sm text-gray-200">
+              <span id="residue-count-label" class="font-mono text-accent font-bold">—</span>
+              residues detected
+            </p>
+            <p class="text-xs text-text-dim mt-0.5">Enter residue numbers to scale their partial charges.</p>
+          </div>
+        </div>
+
+        <!-- Residue number input -->
+        <div class="flex flex-col gap-1.5">
+          <label for="input-residues" class="text-xs font-medium text-text-dim tracking-wide uppercase">
+            Residues to Modify
+          </label>
+          <div class="flex gap-2">
+            <input id="input-residues" type="text" autocomplete="off"
+                   placeholder="e.g.  4, 12, 102"
+                   class="flex-1 rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-sm
+                          font-mono text-gray-100 placeholder:text-surface-700
+                          focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30 transition-colors"/>
+            <button id="fetch-residues-btn"
+              class="flex items-center gap-1.5 rounded-lg px-3 py-2 border border-surface-700
+                     text-text-dim text-xs font-mono hover:border-accent/50 hover:text-accent transition-all duration-150">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/>
+              </svg>
+              Fetch
+            </button>
+          </div>
+          <div id="residue-validation" class="min-h-[1.25rem]">
+            <p class="text-xs font-mono text-text-dim hidden" id="residue-hint">Separate multiple residues with commas.</p>
+            <p class="text-xs font-mono text-red-400 hidden" id="residue-err"></p>
+            <p class="text-xs font-mono text-green-400 hidden" id="residue-ok">✓ Valid selection</p>
+          </div>
+        </div>
+
+        <!-- Residue tag pills -->
+        <div id="residue-tags" class="flex flex-wrap gap-1.5 min-h-[2rem]"></div>
+
+        <!-- 2D Viewer dropdown + SVG panel -->
+        <div id="viewer-2d-panel" class="hidden flex flex-col gap-2">
+          <label for="select-residue-2d" class="text-xs font-medium text-text-dim tracking-wide uppercase">
+            2D Structure Preview
+          </label>
+          <select id="select-residue-2d"
+            class="rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-sm
+                   font-mono text-gray-100 focus:outline-none focus:border-accent/60
+                   focus:ring-1 focus:ring-accent/30 transition-colors cursor-pointer">
+            <option value="">— select a residue —</option>
+          </select>
+
+          <!-- SVG container -->
+          <div id="svg-container"
+            class="relative rounded-lg border border-surface-700 bg-surface-900 overflow-hidden flex items-center justify-center"
+            style="min-height:180px;">
+            <!-- Loading spinner -->
+            <div id="svg-loading" class="hidden absolute inset-0 flex items-center justify-center bg-surface-900 z-10">
+              <div class="h-5 w-5 rounded-full border-2 border-surface-700 border-t-accent animate-spin"></div>
+            </div>
+            <!-- SVG render area -->
+            <div id="svg-render" class="w-full h-full flex items-center justify-center p-2">
+              <p class="text-xs font-mono text-surface-700">Select a residue to preview its structure</p>
+            </div>
+          </div>
+
+          <!-- Residue identity tag -->
+          <div id="svg-residue-label"
+            class="hidden items-center gap-2 rounded-lg border border-accent/20 bg-accent/5 px-3 py-1.5">
+            <span class="font-mono text-xs text-text-dim">Selected:</span>
+            <span id="svg-residue-name" class="font-mono text-sm text-accent font-bold"></span>
+            <span id="svg-residue-num"  class="font-mono text-xs text-text-dim"></span>
+          </div>
+        </div>
+
+        <!-- Highlight in 3D viewer button -->
+        <button id="highlight-btn" disabled
+          class="flex items-center gap-2 rounded-lg px-4 py-2 border border-accent/40 text-accent
+                 text-sm font-medium transition-all duration-200
+                 disabled:opacity-30 disabled:cursor-not-allowed
+                 enabled:hover:bg-accent/10 enabled:active:scale-95">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          Highlight in 3D Viewer
+        </button>
+
+        <div class="border-t border-surface-700 pt-4"></div>
+
+        <!-- Ks factor matrix -->
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-medium text-text-dim tracking-wide uppercase">
+              Charge Scaling Factors (K<sub>s</sub>)
+            </label>
+            <button id="ks-reset-btn"
+              class="text-xs font-mono text-text-dim hover:text-accent transition-colors">Reset</button>
+          </div>
+
+          <!-- Factor checkboxes -->
+          <div id="ks-grid" class="grid grid-cols-4 gap-2">
+            <!-- Injected by JS: 1.0, 0.8, 0.6, 0.4 + custom -->
+          </div>
+
+          <!-- Custom Ks input -->
+          <div class="flex gap-2 items-center">
+            <input id="ks-custom-input" type="number" min="0" max="1" step="0.01"
+                   placeholder="Custom…"
+                   class="flex-1 rounded-lg border border-surface-700 bg-surface-900 px-3 py-1.5 text-sm
+                          font-mono text-gray-100 placeholder:text-surface-700
+                          focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30 transition-colors"/>
+            <button id="ks-add-btn"
+              class="rounded-lg px-3 py-1.5 border border-surface-700 text-xs font-mono text-text-dim
+                     hover:border-accent/50 hover:text-accent transition-all duration-150">
+              + Add
+            </button>
+          </div>
+
+          <!-- Selected factors summary -->
+          <div id="ks-summary" class="font-mono text-xs text-text-dim min-h-[1.25rem]"></div>
+        </div>
+
+      </div>
+      <!-- end right column -->
+    </div>
+    <!-- end two-column grid -->
+
+    <!-- Initialize Study button -->
+    <div class="mt-8 border-t border-surface-700 pt-6 flex items-center gap-4">
+      <button id="init-study-btn"
+        class="flex items-center gap-2 rounded-lg px-7 py-2.5
+               bg-accent text-surface-900 font-semibold text-sm
+               transition-all duration-200
+               disabled:opacity-30 disabled:cursor-not-allowed
+               hover:bg-accent-dim active:scale-95 shadow-amber-glow">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+          <polyline points="22 4 12 14.01 9 11.01"/>
+        </svg>
+        Initialize Study
+      </button>
+      <div id="init-status" class="hidden items-center gap-2 font-mono text-xs">
+        <span id="init-status-dot" class="inline-block h-2 w-2 rounded-full bg-accent animate-pulse"></span>
+        <span id="init-status-text" class="text-text-dim"></span>
+      </div>
+    </div>
+
+    <!-- Init error/success banners -->
+    <div id="init-error-box" class="hidden mt-4 rounded-lg border border-red-900/60 bg-red-950/30 px-4 py-3">
+      <p class="text-xs font-mono text-red-400" id="init-error-text"></p>
+    </div>
+    <div id="init-success-box" class="hidden mt-4 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 space-y-1">
+      <p class="text-xs text-gray-300 font-mono">Study initialized — configuration saved.</p>
+      <p class="text-xs font-mono text-accent" id="init-success-path"></p>
+    </div>
+
+    <!-- ── PLACEHOLDER: Section 3 (MD Parameters) ─────────────────────────── -->
+    <div id="section3-placeholder" class="mt-6 hidden">
+      <div class="rounded-xl border border-dashed border-surface-700 bg-surface-900/30 px-6 py-8 text-center">
+        <p class="font-mono text-xs text-surface-700 tracking-widest uppercase">
+          [ Section 3: MD Parameters — coming next ]
+        </p>
+      </div>
+    </div>
+
+  </div><!-- end section-study-inner -->
+</section>
+
+{% endblock %}
+
+
+{% block scripts %}
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MODULE 1 — HydroUpload
+     XHR upload with progress; orchestrates unlock of Section 2.
+     Exposes: window.HydroUpload
+     ══════════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  "use strict";
+
+  const dropZone          = document.getElementById("drop-zone");
+  const fileInput         = document.getElementById("file-input");
+  const dropIcon          = document.getElementById("drop-icon");
+  const dropLabel         = document.getElementById("drop-label");
+  const dropGlow          = document.getElementById("drop-glow");
+  const fileInfo          = document.getElementById("file-info");
+  const fileNameEl        = document.getElementById("file-name");
+  const fileSizeEl        = document.getElementById("file-size");
+  const clearFileBtn      = document.getElementById("clear-file-btn");
+  const uploadBtn         = document.getElementById("upload-btn");
+  const uploadBtnText     = document.getElementById("upload-btn-text");
+  const progressContainer = document.getElementById("progress-container");
+  const progressBar       = document.getElementById("progress-bar");
+  const progressPct       = document.getElementById("progress-pct");
+  const progressLabel     = document.getElementById("progress-label");
+  const statusBadge       = document.getElementById("status-badge");
+  const statusDot         = document.getElementById("status-dot");
+  const statusText        = document.getElementById("status-text");
+  const errorBox          = document.getElementById("error-box");
+  const errorTextEl       = document.getElementById("error-text");
+  const tleapWarnBox      = document.getElementById("tleap-warn-box");
+  const tleapWarnText     = document.getElementById("tleap-warn-text");
+  const successBox        = document.getElementById("success-box");
+  const successRunId      = document.getElementById("success-run-id");
+
+  /** @type {File|null} */
+  let selectedFile = null;
+
+  function formatBytes(b) {
+    if (b < 1024)    return b + " B";
+    if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+    return                  (b / 1048576).toFixed(2) + " MB";
+  }
+
+  function setError(msg) {
+    errorTextEl.textContent = msg || "";
+    errorBox.classList.toggle("hidden", !msg);
+  }
+
+  function setTleapWarning(msg) {
+    tleapWarnText.textContent = msg || "";
+    tleapWarnBox.classList.toggle("hidden", !msg);
+  }
+
+  function setProgress(pct) {
+    const v = Math.min(100, Math.max(0, pct));
+    progressBar.style.width = v + "%";
+    progressBar.setAttribute("aria-valuenow", v);
+    progressPct.textContent = v + "%";
+  }
+
+  function setStatus(msg, pulsing = true) {
+    statusBadge.classList.toggle("hidden", !msg);
+    statusBadge.classList.toggle("flex", !!msg);
+    statusText.textContent = msg || "";
+    statusDot.classList.toggle("animate-pulse", pulsing);
+  }
+
+  function bindFile(file) {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdb")) { setError("Only .pdb files are accepted."); return; }
+    selectedFile = file;
+    setError(null);
+    setTleapWarning(null);
+    fileNameEl.textContent = file.name;
+    fileSizeEl.textContent = formatBytes(file.size);
+    fileInfo.classList.remove("hidden");
+    dropIcon.classList.replace("text-surface-700", "text-accent");
+    dropLabel.innerHTML = `<span class="font-mono text-accent">${file.name}</span> selected`;
+    uploadBtn.disabled = false;
+    successBox.classList.add("hidden");
+    progressContainer.classList.add("hidden");
+    setProgress(0); setStatus(null);
+  }
+
+  function resetUI() {
+    selectedFile = null;
+    fileInput.value = "";
+    fileInfo.classList.add("hidden");
+    fileNameEl.textContent = ""; fileSizeEl.textContent = "";
+    dropIcon.classList.replace("text-accent", "text-surface-700");
+    dropLabel.innerHTML = `Drop your <span class="font-mono text-accent">.pdb</span> file here`;
+    uploadBtn.disabled = true;
+    uploadBtnText.textContent = "Process PDB";
+    progressContainer.classList.add("hidden");
+    setProgress(0); setStatus(null); setError(null); setTleapWarning(null);
+    successBox.classList.add("hidden");
+  }
+
+  function uploadFile() {
+    return new Promise((resolve, reject) => {
+      const fd = new FormData();
+      fd.append("pdb_file", selectedFile);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/upload", true);
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          setProgress(pct);
+          progressLabel.textContent = pct < 100 ? "Uploading…" : "Running tleap…";
+        }
+      });
+      xhr.addEventListener("load", () => {
+        try {
+          const body = JSON.parse(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300) resolve(body);
+          else reject(new Error(body.detail || `Server error ${xhr.status}`));
+        } catch { reject(new Error("Unexpected server response.")); }
+      });
+      xhr.addEventListener("error", () => reject(new Error("Network error during upload.")));
+      xhr.addEventListener("abort", () => reject(new Error("Transfer cancelled.")));
+      xhr.send(fd);
+    });
+  }
+
+  fileInput.addEventListener("change", () => { if (fileInput.files?.[0]) bindFile(fileInput.files[0]); });
+  dropZone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); } });
+  dropZone.addEventListener("dragenter", (e) => { e.preventDefault(); dropZone.classList.add("border-accent/60","bg-surface-900"); dropGlow.classList.replace("opacity-0","opacity-100"); });
+  dropZone.addEventListener("dragover",  (e) => e.preventDefault());
+  dropZone.addEventListener("dragleave", (e) => { if (dropZone.contains(e.relatedTarget)) return; dropZone.classList.remove("border-accent/60","bg-surface-900"); dropGlow.classList.replace("opacity-100","opacity-0"); });
+  dropZone.addEventListener("drop", (e) => { e.preventDefault(); dropZone.classList.remove("border-accent/60","bg-surface-900"); dropGlow.classList.replace("opacity-100","opacity-0"); if (e.dataTransfer?.files?.[0]) bindFile(e.dataTransfer.files[0]); });
+  clearFileBtn.addEventListener("click", (e) => { e.stopPropagation(); resetUI(); });
+
+  uploadBtn.addEventListener("click", async () => {
+    if (!selectedFile) return;
+    uploadBtn.disabled = true;
+    uploadBtnText.textContent = "Processing…";
+    progressContainer.classList.remove("hidden");
+    setProgress(0); setStatus("Uploading file…"); setError(null); setTleapWarning(null);
+    successBox.classList.add("hidden");
+    try {
+      const result = await uploadFile();
+      setProgress(100);
+      progressLabel.textContent = "Transfer complete";
+      statusDot.classList.remove("animate-pulse"); statusDot.classList.add("bg-green-400");
+      setStatus("Done", false);
+      if (result.tleap_error) setTleapWarning("⚠ tleap: " + result.tleap_error + " — displaying original PDB.");
+      successRunId.textContent = `run_id: ${result.run_id}  ·  ${formatBytes(result.size_bytes)}  ·  ${result.residue_count} residues`;
+      successBox.classList.remove("hidden");
+      uploadBtn.disabled = false; uploadBtnText.textContent = "Process PDB";
+      if (window.HydroStudy) window.HydroStudy.unlock(result);
+    } catch (err) {
+      setError(err.message || "Unknown error during upload.");
+      setStatus(null); progressContainer.classList.add("hidden"); setProgress(0);
+      uploadBtn.disabled = false; uploadBtnText.textContent = "Retry";
+    }
+  });
+
+  window.HydroUpload = { bindFile, reset: resetUI, getSelectedFile: () => selectedFile };
+}());
+</script>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MODULE 2 — HydroStudy
+     Section 2: unlock, 3D viewer, residue fetch/map, 2D SVG, Ks matrix, save.
+     Exposes: window.HydroStudy
+     ══════════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  "use strict";
+
+  // ── DOM refs ─────────────────────────────────────────────────────────────
+  const sectionEl        = document.getElementById("section-study");
+  const lockEl           = document.getElementById("section-study-lock");
+  const innerEl          = document.getElementById("section-study-inner");
+
+  const inputStudyName   = document.getElementById("input-study-name");
+  const inputFolderName  = document.getElementById("input-folder-name");
+  const folderAutoBadge  = document.getElementById("folder-auto-badge");
+  const studyNameErr     = document.getElementById("study-name-err");
+  const folderNameErr    = document.getElementById("folder-name-err");
+
+  const nglContainer     = document.getElementById("ngl-container");
+  const nglLoading       = document.getElementById("ngl-loading");
+  const nglError         = document.getElementById("ngl-error");
+  const nglErrorText     = document.getElementById("ngl-error-text");
+  const reprToggleGroup  = document.getElementById("repr-toggle-group");
+  const tleapPillDot     = document.getElementById("tleap-pill-dot");
+  const tleapPillText    = document.getElementById("tleap-pill-text");
+
+  const residueCountLabel = document.getElementById("residue-count-label");
+  const inputResidues     = document.getElementById("input-residues");
+  const fetchResiduesBtn  = document.getElementById("fetch-residues-btn");
+  const residueHint       = document.getElementById("residue-hint");
+  const residueErr        = document.getElementById("residue-err");
+  const residueOk         = document.getElementById("residue-ok");
+  const residueTags       = document.getElementById("residue-tags");
+  const highlightBtn      = document.getElementById("highlight-btn");
+
+  const viewer2dPanel     = document.getElementById("viewer-2d-panel");
+  const selectResidue2d   = document.getElementById("select-residue-2d");
+  const svgContainer      = document.getElementById("svg-container");
+  const svgLoading        = document.getElementById("svg-loading");
+  const svgRender         = document.getElementById("svg-render");
+  const svgResidueLabel   = document.getElementById("svg-residue-label");
+  const svgResidueName    = document.getElementById("svg-residue-name");
+  const svgResidueNum     = document.getElementById("svg-residue-num");
+
+  const ksGrid            = document.getElementById("ks-grid");
+  const ksResetBtn        = document.getElementById("ks-reset-btn");
+  const ksCustomInput     = document.getElementById("ks-custom-input");
+  const ksAddBtn          = document.getElementById("ks-add-btn");
+  const ksSummary         = document.getElementById("ks-summary");
+
+  const initStudyBtn      = document.getElementById("init-study-btn");
+  const initStatus        = document.getElementById("init-status");
+  const initStatusDot     = document.getElementById("init-status-dot");
+  const initStatusText    = document.getElementById("init-status-text");
+  const initErrorBox      = document.getElementById("init-error-box");
+  const initErrorText     = document.getElementById("init-error-text");
+  const initSuccessBox    = document.getElementById("init-success-box");
+  const initSuccessPath   = document.getElementById("init-success-path");
+  const section3Placeholder = document.getElementById("section3-placeholder");
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  /** @type {object|null} */    let runMeta        = null;
+  /** @type {number} */         let totalResidues  = 0;
+  /** @type {number[]} */       let validResidues  = [];
+  /** @type {object} */         let residueMap     = {};   // { "4": "LYS", … }
+  /** @type {any|null} */       let nglStage       = null;
+  /** @type {any|null} */       let nglComponent   = null;
+  /** @type {string} */         let activeRepr     = "cartoon";
+  /** @type {Set<number>} */    let ksSelected     = new Set([1.0, 0.8, 0.6, 0.4]);
+  /** @type {Set<number>} */    let ksAll          = new Set([1.0, 0.8, 0.6, 0.4]);
+
+  // ── Unlock animation ──────────────────────────────────────────────────────
+
+  /**
+   * Called by HydroUpload after a successful /api/upload response.
+   * @param {object} meta
+   */
+  function unlock(meta) {
+    runMeta       = meta;
+    totalResidues = meta.residue_count || 0;
+
+    lockEl.style.opacity        = "0";
+    lockEl.style.pointerEvents  = "none";
+    lockEl.style.backdropFilter = "blur(0px)";
+    setTimeout(() => lockEl.classList.add("hidden"), 700);
+
+    sectionEl.classList.remove("border-surface-700");
+    sectionEl.classList.add("border-accent/40", "shadow-amber-soft");
+    sectionEl.removeAttribute("aria-disabled");
+    sectionEl.removeAttribute("data-locked");
+
+    innerEl.classList.remove("opacity-20", "pointer-events-none", "select-none");
+
+    _populateMetadata(meta);
+
+    residueCountLabel.textContent = totalResidues > 0 ? totalResidues : "—";
+
+    if (meta.tleap_ok) {
+      tleapPillDot.style.background = "#4ade80";
+      tleapPillText.textContent = "tleap OK — protonated structure loaded (with_H.pdb)";
+      tleapPillText.className   = "font-mono text-xs text-green-400";
+    } else {
+      tleapPillDot.style.background = "#eab308";
+      tleapPillText.textContent = "tleap unavailable — displaying original PDB";
+      tleapPillText.className   = "font-mono text-xs text-yellow-400";
+    }
+
+    _renderKsGrid();
+
+    setTimeout(() => sectionEl.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+    setTimeout(() => _initNGL(meta.pdb_url), 600);
+  }
+
+  // ── Metadata auto-fill ────────────────────────────────────────────────────
+
+  function _populateMetadata(meta) {
+    if (!inputFolderName.value.trim()) {
+      inputFolderName.value = meta.folder_name || meta.run_id;
+      folderAutoBadge.classList.remove("hidden");
+    }
+    if (!inputStudyName.value.trim() && meta.original_filename) {
+      inputStudyName.value = meta.original_filename.replace(/\.pdb$/i, "");
+    }
+  }
+
+  inputFolderName.addEventListener("input", () => { folderAutoBadge.classList.add("hidden"); _validateFolder(); });
+  inputStudyName.addEventListener("input", _validateStudyName);
+
+  function _validateStudyName() {
+    const ok = inputStudyName.value.trim().length > 0;
+    studyNameErr.classList.toggle("hidden", ok);
+    return ok;
+  }
+  function _validateFolder() {
+    const ok = inputFolderName.value.trim().length > 0;
+    folderNameErr.classList.toggle("hidden", ok);
+    return ok;
+  }
+
+  // ── NGL Viewer ───────────────────────────────────────────────────────────
+
+  function _initNGL(pdbUrl) {
+    if (typeof NGL === "undefined") {
+      _showNGLError("NGL Viewer not available. Check CDN connectivity (unpkg.com/ngl).");
+      return;
+    }
+    nglLoading.classList.remove("hidden");
+    nglError.classList.add("hidden");
+
+    if (nglStage) { nglStage.dispose(); nglStage = null; nglComponent = null; }
+
+    nglStage = new NGL.Stage(nglContainer, { backgroundColor: "#0d0d11", tooltip: false });
+
+    const ro = new ResizeObserver(() => { if (nglStage) nglStage.handleResize(); });
+    ro.observe(nglContainer);
+
+    nglStage.loadFile(pdbUrl, { ext: "pdb", defaultRepresentation: false })
+      .then((component) => {
+        nglComponent = component;
+        component.addRepresentation("cartoon", { colorScheme: "sstruc", aspectRatio: 2.5, scale: 0.7 });
+        component.autoView();
+        nglLoading.classList.add("hidden");
+      })
+      .catch((err) => {
+        console.error("NGL error:", err);
+        _showNGLError("Failed to load structure: " + (err.message || err));
+      });
+  }
+
+  function _showNGLError(msg) {
+    nglLoading.classList.add("hidden");
+    nglErrorText.textContent = msg;
+    nglError.classList.remove("hidden"); nglError.classList.add("flex");
+  }
+
+  reprToggleGroup.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-repr]");
+    if (!btn || !nglComponent) return;
+    const repr = btn.dataset.repr;
+    if (repr === activeRepr) return;
+    reprToggleGroup.querySelectorAll(".repr-btn").forEach((b) => {
+      b.classList.remove("bg-accent","text-surface-900");
+      b.classList.add("bg-surface-700","text-text-dim");
+    });
+    btn.classList.add("bg-accent","text-surface-900");
+    btn.classList.remove("bg-surface-700","text-text-dim");
+    activeRepr = repr;
+    nglComponent.removeAllRepresentations();
+    const reprOpts = {
+      cartoon:      { colorScheme: "sstruc", aspectRatio: 2.5, scale: 0.7 },
+      "ball+stick": { colorScheme: "element", multipleBond: "symmetric" },
+      surface:      { colorScheme: "hydrophobicity", opacity: 0.85, surfaceType: "av" },
+    };
+    nglComponent.addRepresentation(repr, reprOpts[repr] || {});
+    nglComponent.autoView();
+  });
+
+  // ── Residue input & fetch ─────────────────────────────────────────────────
+
+  inputResidues.addEventListener("focus", () => residueHint.classList.remove("hidden"));
+  inputResidues.addEventListener("blur",  () => residueHint.classList.add("hidden"));
+  inputResidues.addEventListener("input", _validateResidueInput);
+
+  function _validateResidueInput() {
+    const raw = inputResidues.value.trim();
+    residueErr.classList.add("hidden");
+    residueOk.classList.add("hidden");
+    residueTags.innerHTML = "";
+    validResidues = [];
+    highlightBtn.disabled = true;
+    if (!raw) return;
+
+    const parts  = raw.split(",").map(s => s.trim()).filter(Boolean);
+    const errors = [];
+    const parsed = [];
+
+    for (const part of parts) {
+      if (!/^\d+$/.test(part)) { errors.push(`"${part}" is not a number`); continue; }
+      const n = parseInt(part, 10);
+      if (totalResidues > 0 && (n < 1 || n > totalResidues)) {
+        errors.push(`${n} out of range (1–${totalResidues})`); continue;
+      }
+      if (!parsed.includes(n)) parsed.push(n);
+    }
+
+    if (errors.length) {
+      residueErr.textContent = "Invalid: " + errors.join("; ");
+      residueErr.classList.remove("hidden");
+      return;
+    }
+    if (!parsed.length) return;
+
+    validResidues = parsed;
+    residueOk.classList.remove("hidden");
+    highlightBtn.disabled = false;
+
+    parsed.forEach(n => {
+      const tag = document.createElement("span");
+      tag.className = "inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded-full border border-accent/40 bg-accent/10 text-accent";
+      tag.textContent = n;
+      residueTags.appendChild(tag);
+    });
+  }
+
+  /** Fetch residue name map from backend and populate the 2D dropdown. */
+  async function _fetchResidueMap() {
+    if (!runMeta || !validResidues.length) return;
+
+    fetchResiduesBtn.disabled = true;
+    fetchResiduesBtn.textContent = "…";
+
+    try {
+      const resp = await fetch(`/api/residues/map/${runMeta.run_id}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      residueMap = data.residues || {};
+
+      // Populate dropdown with only the user-selected residues
+      selectResidue2d.innerHTML = '<option value="">— select a residue —</option>';
+      validResidues.forEach(n => {
+        const name   = residueMap[String(n)] || "UNK";
+        const option = document.createElement("option");
+        option.value       = name;
+        option.dataset.num = n;
+        option.textContent = `${n} — ${name}`;
+        selectResidue2d.appendChild(option);
+      });
+
+      // Update tag pills with names
+      residueTags.innerHTML = "";
+      validResidues.forEach(n => {
+        const name = residueMap[String(n)] || "UNK";
+        const tag  = document.createElement("span");
+        tag.className = "inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded-full border border-accent/40 bg-accent/10 text-accent";
+        tag.innerHTML  = `<span>${n}</span><span class="text-accent/60">·</span><span>${name}</span>`;
+        residueTags.appendChild(tag);
+      });
+
+      viewer2dPanel.classList.remove("hidden");
+      viewer2dPanel.classList.add("flex");
+
+    } catch (err) {
+      residueErr.textContent = "Failed to fetch residue map: " + err.message;
+      residueErr.classList.remove("hidden");
+    } finally {
+      fetchResiduesBtn.disabled = false;
+      fetchResiduesBtn.innerHTML = `<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4"/></svg> Fetch`;
+    }
+  }
+
+  fetchResiduesBtn.addEventListener("click", _fetchResidueMap);
+
+  // ── 2D SVG viewer ─────────────────────────────────────────────────────────
+
+  selectResidue2d.addEventListener("change", async () => {
+    const selected = selectResidue2d.selectedOptions[0];
+    if (!selected || !selected.value) return;
+
+    const resName = selected.value;
+    const resNum  = selected.dataset.num;
+
+    svgLoading.classList.remove("hidden");
+    svgRender.innerHTML = "";
+    svgResidueLabel.classList.add("hidden");
+
+    try {
+      const resp = await fetch(`/api/residue/2d/${resName}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const svg = await resp.text();
+
+      svgRender.innerHTML = svg;
+
+      // Make the inline SVG responsive
+      const svgEl = svgRender.querySelector("svg");
+      if (svgEl) {
+        svgEl.removeAttribute("width");
+        svgEl.removeAttribute("height");
+        svgEl.style.width  = "100%";
+        svgEl.style.height = "auto";
+        svgEl.style.maxHeight = "200px";
+      }
+
+      svgResidueName.textContent = resName;
+      svgResidueNum.textContent  = `#${resNum}`;
+      svgResidueLabel.classList.remove("hidden");
+      svgResidueLabel.classList.add("flex");
+    } catch (err) {
+      svgRender.innerHTML = `<p class="text-xs font-mono text-red-400 p-4">Failed to load 2D structure: ${err.message}</p>`;
+    } finally {
+      svgLoading.classList.add("hidden");
+    }
+  });
+
+  // ── Highlight in 3D viewer ────────────────────────────────────────────────
+
+  highlightBtn.addEventListener("click", () => {
+    if (!nglComponent || !validResidues.length) return;
+    const sele = validResidues.map(String).join(" or ");
+    const existing = nglComponent.reprList.find(r => r.name === "__highlight__");
+    if (existing) nglComponent.removeRepresentation(existing);
+    nglComponent.addRepresentation("ball+stick", {
+      sele,
+      colorValue: "#f59e0b",
+      aspectRatio: 2.0,
+      name: "__highlight__",
+    });
+    try {
+      nglStage.animationControls.zoomMove(
+        nglComponent.getCenter(sele),
+        nglStage.viewer.camera.position.distanceTo(nglComponent.getCenter(sele)) * 0.6,
+        600
+      );
+    } catch (_) { nglComponent.autoView(sele); }
+  });
+
+  // ── Ks factor matrix ──────────────────────────────────────────────────────
+
+  const DEFAULT_KS = [1.0, 0.8, 0.6, 0.4];
+
+  function _renderKsGrid() {
+    ksGrid.innerHTML = "";
+    [...ksAll].sort((a, b) => b - a).forEach(factor => _createKsChip(factor));
+    _updateKsSummary();
+  }
+
+  function _createKsChip(factor) {
+    const isSelected = ksSelected.has(factor);
+    const chip = document.createElement("label");
+    chip.className = [
+      "relative flex flex-col items-center justify-center gap-0.5 rounded-lg border",
+      "px-2 py-2.5 cursor-pointer text-center transition-all duration-150 select-none",
+      isSelected
+        ? "border-accent bg-accent/10 text-accent"
+        : "border-surface-700 bg-surface-900/40 text-text-dim hover:border-accent/40",
+    ].join(" ");
+
+    const checkbox = document.createElement("input");
+    checkbox.type    = "checkbox";
+    checkbox.checked = isSelected;
+    checkbox.value   = factor;
+    checkbox.className = "sr-only";
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) ksSelected.add(factor);
+      else                  ksSelected.delete(factor);
+      _renderKsGrid();
+    });
+
+    const label = document.createElement("span");
+    label.className   = "font-mono text-sm font-bold leading-none";
+    label.textContent = factor.toFixed(2);
+
+    const sub = document.createElement("span");
+    sub.className   = "font-mono text-xs opacity-60";
+    sub.textContent = factor === 1.0 ? "baseline" : `×${factor}`;
+
+    chip.appendChild(checkbox);
+    chip.appendChild(label);
+    chip.appendChild(sub);
+    ksGrid.appendChild(chip);
+  }
+
+  function _updateKsSummary() {
+    const sorted = [...ksSelected].sort((a, b) => b - a);
+    ksSummary.textContent = sorted.length
+      ? "Selected: " + sorted.map(f => f.toFixed(2)).join(", ")
+      : "No factors selected.";
+  }
+
+  ksResetBtn.addEventListener("click", () => {
+    ksSelected = new Set(DEFAULT_KS);
+    ksAll      = new Set(DEFAULT_KS);
+    _renderKsGrid();
+  });
+
+  ksAddBtn.addEventListener("click", () => {
+    const raw = parseFloat(ksCustomInput.value);
+    if (isNaN(raw) || raw < 0 || raw > 1) {
+      ksCustomInput.classList.add("border-red-500");
+      setTimeout(() => ksCustomInput.classList.remove("border-red-500"), 1200);
+      return;
+    }
+    const rounded = Math.round(raw * 100) / 100;
+    if (!ksAll.has(rounded)) { ksAll.add(rounded); }
+    ksSelected.add(rounded);
+    ksCustomInput.value = "";
+    _renderKsGrid();
+  });
+
+  ksCustomInput.addEventListener("keydown", (e) => { if (e.key === "Enter") ksAddBtn.click(); });
+
+  // ── Initialize Study ─────────────────────────────────────────────────────
+
+  function _setInitStatus(msg, pulsing = true) {
+    initStatus.classList.toggle("hidden", !msg);
+    initStatus.classList.toggle("flex", !!msg);
+    initStatusText.textContent = msg || "";
+    initStatusDot.classList.toggle("animate-pulse", pulsing);
+  }
+
+  initStudyBtn.addEventListener("click", async () => {
+    if (!runMeta) return;
+    if (!_validateStudyName() || !_validateFolder()) return;
+    if (!validResidues.length) {
+      initErrorText.textContent = "Select at least one residue before initializing.";
+      initErrorBox.classList.remove("hidden"); return;
+    }
+    if (!ksSelected.size) {
+      initErrorText.textContent = "Select at least one Ks factor.";
+      initErrorBox.classList.remove("hidden"); return;
+    }
+
+    initStudyBtn.disabled = true;
+    initErrorBox.classList.add("hidden");
+    initSuccessBox.classList.add("hidden");
+    _setInitStatus("Saving configuration…");
+
+    const payload = {
+      run_id:             runMeta.run_id,
+      study_name:         inputStudyName.value.trim(),
+      folder_name:        inputFolderName.value.trim(),
+      original_filename:  runMeta.original_filename || "",
+      pdb_to_serve:       runMeta.pdb_to_serve      || "",
+      total_residues:     totalResidues,
+      selected_residues:  validResidues,
+      ks_factors:         [...ksSelected].sort((a, b) => b - a),
+    };
+
+    try {
+      const resp = await fetch("/api/study/config", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+
+      _setInitStatus("Saved!", false);
+      initStatusDot.style.background = "#4ade80";
+      initSuccessPath.textContent    = data.config_path;
+      initSuccessBox.classList.remove("hidden");
+
+      // Reveal Section 3 placeholder
+      section3Placeholder.classList.remove("hidden");
+      setTimeout(() => section3Placeholder.scrollIntoView({ behavior: "smooth", block: "nearest" }), 400);
+
+    } catch (err) {
+      initErrorText.textContent = err.message || "Unknown error.";
+      initErrorBox.classList.remove("hidden");
+      _setInitStatus(null);
+    } finally {
+      initStudyBtn.disabled = false;
+    }
+  });
+
+  // ── Public API ──────────────────────────────────────────────────────────────
+  window.HydroStudy = {
+    unlock,
+    getMeta:           () => runMeta,
+    getValidResidues:  () => validResidues,
+    getResidueMap:     () => residueMap,
+    getKsFactors:      () => [...ksSelected].sort((a, b) => b - a),
+    getNGLStage:       () => nglStage,
+  };
+
+}());
+</script>
+{% endblock %}

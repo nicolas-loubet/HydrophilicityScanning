@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}HydroScan{% endblock %}</title>
+
+  <!-- ── Favicon — drop your icon file into static/ as icon.png ─────────── -->
+  <link rel="icon" type="image/png" href="/static/icon.png" />
+  <link rel="apple-touch-icon" href="/static/icon.png" />
+
+  <!-- ── Google Fonts ───────────────────────────────────────────────────── -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- ── Tailwind CDN + Cyber Amber theme extension ─────────────────────── -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'surface-900': '#0d0d11',   // Fondo ultra oscuro profundo
+            'surface-800': '#16161f',   // Fondo de contenedores de secciones
+            'surface-700': '#23232f',   // Bordes, líneas divisorias e inputs
+            'accent':      '#f59e0b',   // Naranja/Ámbar eléctrico
+            'accent-dim':  '#b45309',   // Ámbar apagado para hovers
+            'text-dim':    '#9ca3af',   // Gris suave para textos secundarios
+          },
+          fontFamily: {
+            sans:  ['"DM Sans"', 'system-ui', 'sans-serif'],
+            mono:  ['"JetBrains Mono"', 'monospace'],
+          },
+          boxShadow: {
+            'amber-glow':  '0 0 18px 2px rgba(245,158,11,0.25)',
+            'amber-soft':  '0 0 40px 8px rgba(245,158,11,0.10)',
+          },
+          animation: {
+            'pulse-amber': 'pulse-amber 2s ease-in-out infinite',
+            'fade-in':     'fade-in 0.5s ease forwards',
+          },
+          keyframes: {
+            'pulse-amber': {
+              '0%, 100%': { boxShadow: '0 0 8px 1px rgba(245,158,11,0.15)' },
+              '50%':       { boxShadow: '0 0 22px 4px rgba(245,158,11,0.35)' },
+            },
+            'fade-in': {
+              from: { opacity: '0', transform: 'translateY(8px)' },
+              to:   { opacity: '1', transform: 'translateY(0)' },
+            },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- ── Global base styles (kept minimal — Tailwind does the heavy lifting) -->
+  <style>
+    /* Scrollbar theming */
+    ::-webkit-scrollbar              { width: 6px; }
+    ::-webkit-scrollbar-track        { background: #0d0d11; }
+    ::-webkit-scrollbar-thumb        { background: #23232f; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover  { background: #f59e0b55; }
+
+    /* Selection */
+    ::selection { background: rgba(245,158,11,0.30); color: #fff; }
+
+    /* Subtle scanline overlay for the "instrument panel" aesthetic */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.04) 2px,
+        rgba(0,0,0,0.04) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+  </style>
+
+  {% block extra_head %}{% endblock %}
+</head>
+
+<body class="bg-surface-900 font-sans text-gray-100 antialiased min-h-screen">
+
+  <!-- ── Top bar ──────────────────────────────────────────────────────────── -->
+  <header class="sticky top-0 z-50 border-b border-surface-700 bg-surface-900/90 backdrop-blur-sm">
+    <div class="mx-auto max-w-5xl px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <!-- Brand icon — served from /static/icon.png (drop your file there) -->
+        <img src="/static/icon.png" alt="HydroScan icon" class="h-6 w-6 object-contain" />
+        <span class="font-mono font-bold text-accent tracking-widest text-sm uppercase">HydrophilicityScanning</span>
+        <span class="hidden sm:inline text-text-dim text-xs font-light tracking-wide">/ Charge-Scaling · AMBER</span>
+      </div>
+      <span class="font-mono text-xs text-surface-700 select-none">v0.1.0-dev</span>
+    </div>
+  </header>
+
+  <!-- ── Page content ─────────────────────────────────────────────────────── -->
+  <main class="mx-auto max-w-5xl px-6 py-12 space-y-8">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- ── Footer ───────────────────────────────────────────────────────────── -->
+  <footer class="mt-24 border-t border-surface-700 py-6 text-center">
+    <p class="font-mono text-xs text-surface-700">
+      HydroScan · HydrophilicityScanning · AMBER Force Field
+    </p>
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

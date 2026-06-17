@@ -1,0 +1,10 @@
+# HydroSim — Python dependencies
+# Install with: pip install -r requirements.txt
+
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+jinja2==3.1.4
+python-multipart==0.0.17
+aiofiles==24.1.0
+rdkit>=2023.9.1
+tomli-w>=1.0.0

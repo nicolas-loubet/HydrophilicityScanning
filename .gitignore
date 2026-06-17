@@ -1,0 +1,38 @@
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+v4s_env/
+pip-log.txt
+pip-delete-this-directory.txt
+.env
+
+# === Datos de Salida y Gráficos ===
+data/resultados/*
+*.csv
+*.png
+*.pdf
+*.svg
+!favicon.svg
+
+# === IDEs y Editores de Código ===
+.vscode/
+.idea/
+*.swp
+*~
+
+# === Sistema Operativo ===
+.DS_Store
+.directory
+
+# === Notas de desarrollo ===
+notas/
+
+# === Compilados y comunicación ===
+build/
+scheduled-runs/
