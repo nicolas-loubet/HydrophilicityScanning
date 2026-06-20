@@ -165,6 +165,9 @@ class StudyConfigPayload(BaseModel):
     total_residues:     int = 0
     selected_residues:  list[int]
     ks_factors:         list[float]
+    salt_type:          str   = "NaCl"
+    salt_concentration: float = 0.0
+    box_shape:          str   = "box"
 
     @field_validator("run_id")
     @classmethod
@@ -182,6 +185,36 @@ class StudyConfigPayload(BaseModel):
             if not (0.0 <= f <= 1.0):
                 raise ValueError(f"Ks factor {f} is out of range [0, 1].")
         return v
+
+class IonConfig(BaseModel):
+    """Ion configuration submitted alongside study config."""
+
+    salt_type:          str   = "NaCl"   # "NaCl" | "KCl" | "MgCl2"
+    salt_concentration: float = 0.0      # mol/L; 0.0 = neutralize only
+    box_shape:          str   = "box"    # "box" = rectangular | "oct" = truncated octahedron
+
+    @field_validator("salt_type")
+    @classmethod
+    def _validate_salt(cls, v: str) -> str:
+        allowed = {"NaCl", "KCl", "MgCl2"}
+        if v not in allowed:
+            raise ValueError(f"salt_type must be one of {allowed}.")
+        return v
+
+    @field_validator("salt_concentration")
+    @classmethod
+    def _validate_conc(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("salt_concentration must be >= 0.")
+        return v
+
+    @field_validator("box_shape")
+    @classmethod
+    def _validate_box(cls, v: str) -> str:
+        if v not in {"box", "oct"}:
+            raise ValueError('box_shape must be "box" or "oct".')
+        return v
+
 
 
 # ---------------------------------------------------------------------------
@@ -336,22 +369,180 @@ def _generate_residue_svg(res_name: str) -> str:
         # Inject transparent background on the root <svg> element so the panel
         # background shows through rather than a white rectangle.
         svg = re.sub(r"(<svg)", r'\1 style="background:transparent"', svg, count=1)
+        # Wedge bond fills default to black (#000000), which is invisible on dark
+        # backgrounds.  Replace with light grey to match the bond/atom palette.
+        svg = re.sub(r"\bfill='#000000'", "fill='#D8D8D8'", svg)
         return svg
 
     except ImportError:
         return _fallback("RDKit not available on this server")
 
 
-def _write_tleap_script(run_dir: Path, pdb_filename: str) -> Path:
-    """Write the tleap input script (render.in) into run_dir."""
+# ---------------------------------------------------------------------------
+# Ion residue name sets — used by both tleap script generation and
+# ParmEd charge-neutralization to identify ion atoms in the topology.
+# ---------------------------------------------------------------------------
+
+SALT_ION_NAMES: dict[str, tuple[str, str]] = {
+    #            positive ion   negative ion
+    "NaCl":  ("Na+",  "Cl-"),
+    "KCl":   ("K+",   "Cl-"),
+    "MgCl2": ("Mg2+", "Cl-"),
+}
+
+# AMBER residue-name spellings that TLeap may write in the PDB / topology.
+# Keys are the canonical form used in addions commands; values are all aliases.
+AMBER_ION_ALIASES: dict[str, set[str]] = {
+    "Na+":  {"Na+", "NA",  "SOD"},
+    "Cl-":  {"Cl-", "CL",  "CLA"},
+    "K+":   {"K+",  "K",   "POT"},
+    "Mg2+": {"Mg2+","MG",  "MG2"},
+}
+
+# Regex for filtering ion names from TLeap stdout
+_ION_NAME_RE = re.compile(
+    r"^(Na\+|Cl-|K\+|Mg2\+?|MG|NA|CL)$", re.IGNORECASE
+)
+_TLEAP_ADDING_RE = re.compile(
+    r"Adding\s+(\d+)\s+([\w\+\-]+)\s+ions?\s+to", re.IGNORECASE
+)
+_TLEAP_NEUTRALIZE_RE = re.compile(
+    r"(\d+)\s+(Na\+|Cl-|K\+|Mg2\+|MG|NA|CL)\s+ions?\s+required\s+to\s+neutralize",
+    re.IGNORECASE,
+)
+
+
+def _parse_ions_from_tleap_log(log: str) -> dict[str, int]:
+    """
+    Parse ion counts from TLeap stdout.
+
+    Returns a dict mapping ion name → number of atoms added, e.g.
+    ``{"Na+": 10, "Cl-": 10}``.
+    """
+    counts: dict[str, int] = {}
+    for m in _TLEAP_ADDING_RE.finditer(log):
+        n, ion = int(m.group(1)), m.group(2)
+        if _ION_NAME_RE.match(ion):
+            counts[ion] = counts.get(ion, 0) + n
+    for m in _TLEAP_NEUTRALIZE_RE.finditer(log):
+        n, ion = int(m.group(1)), m.group(2)
+        counts[ion] = counts.get(ion, 0) + n
+    return counts
+
+
+def _tleap_solvate_cmd(box_shape: str) -> str:
+    """
+    Return the TLeap solvation command for the chosen box geometry.
+
+    Parameters
+    ----------
+    box_shape : "box" or "oct"
+        "box" produces a rectangular water box (``solvateBox``).
+        "oct" produces a truncated octahedron (``solvateOct``), which uses
+        roughly 20 % fewer water molecules for the same buffer distance,
+        reducing computational cost while maintaining periodic boundary
+        conditions.
+
+    The TIP3PBOX unit is used in both cases (compatible with ff19SB).
+    Buffer distance is 12 Å in both cases.
+    """
+    if box_shape == "oct":
+        return "solvateOct sys TIP3PBOX 12.0"
+    return "solvateBox sys TIP3PBOX 12.0"
+
+
+def _write_tleap_script(
+    run_dir: Path,
+    pdb_filename: str,
+    ion_cfg: "IonConfig | None" = None,
+) -> Path:
+    """
+    Write the tleap input script (render.in) into *run_dir*.
+
+    The script:
+      1. Loads the ff19SB force field and TIP3P water model.
+      2. Loads the uploaded PDB and adds missing hydrogens.
+      3. Solvates the system in a TIP3P water box with a 12 Å buffer.
+      4. Adds ions according to *ion_cfg*:
+
+         - concentration == 0  → neutralize only via ``addions``.
+         - concentration > 0   → neutralize first, then add salt at the
+                                  requested molarity via ``addions2``.
+         - Edge case: if the protein is already perfectly neutral (0 counter
+           ions needed), force at least 1 positive + 1 negative ion so the
+           topology always contains ions for the charge-scaling step.
+
+      5. Saves the AmberParm topology (sys.prmtop / sys.rst7) and a PDB of
+         the solvated, protonated structure (with_H.pdb).
+
+    Parameters
+    ----------
+    run_dir:      Directory where render.in is written.
+    pdb_filename: Name of the input PDB file (relative to run_dir).
+    ion_cfg:      Ion configuration; defaults to NaCl neutralize-only if None.
+    """
+    if ion_cfg is None:
+        from app.main import IonConfig  # local import to avoid circular ref
+        ion_cfg = IonConfig()
+
+    pos_ion, neg_ion = SALT_ION_NAMES[ion_cfg.salt_type]
+
+    # ------------------------------------------------------------------
+    # Build addions block
+    #
+    # Strategy:
+    #   Step A — Neutralize:
+    #     addions sys <pos> 0   ← TLeap adds the exact number needed
+    #     addions sys <neg> 0
+    #
+    #   Step B — Additional salt at requested molarity (if conc > 0):
+    #     addions2 sys <pos> <conc>
+    #     addions2 sys <neg> <conc>
+    #
+    #   Edge case — already neutral protein:
+    #     TLeap will add 0 ions in Step A.  We force 1 pos + 1 neg
+    #     so the topology is never ion-free, which would make the
+    #     ParmEd charge-redistribution step fail silently.
+    # ------------------------------------------------------------------
+
+    # Step A: neutralize
+    addions_lines = [
+        f"addions sys {pos_ion} 0",
+        f"addions sys {neg_ion} 0",
+        "# Edge-case guard: ensure at least 1 positive AND 1 negative ion",
+        "# even if the protein charge was already 0.  TLeap skips addions",
+        "# silently when 0 counter-ions are needed; we force 1 of each.",
+        f"addions sys {pos_ion} 1",
+        f"addions sys {neg_ion} 1",
+    ]
+
+    # Step B: additional molar salt
+    if ion_cfg.salt_concentration > 0:
+        conc = round(ion_cfg.salt_concentration, 4)
+        addions_lines += [
+            f"# Additional {ion_cfg.salt_type} at {conc} mol/L",
+            f"addions2 sys {pos_ion} {conc}",
+            f"addions2 sys {neg_ion} {conc}",
+        ]
+
+    addions_block = "\n".join(addions_lines)
+
     script = (
         "source leaprc.protein.ff19SB\n"
+        "source leaprc.water.tip3p\n"
         f"sys = loadpdb {pdb_filename}\n"
         "savepdb sys with_H.pdb\n"
+        "# Solvate with a 12 Angstrom TIP3P water buffer\n"
+        + _tleap_solvate_cmd(ion_cfg.box_shape) + "\n"
+        f"{addions_block}\n"
+        "# Save AMBER topology and coordinates\n"
+        "saveAmberParm sys sys.prmtop sys.rst7\n"
         "quit\n"
     )
     path = run_dir / "render.in"
     path.write_text(script)
+    logger.debug("render.in written to %s (salt=%s conc=%.4f)",
+                 path, ion_cfg.salt_type, ion_cfg.salt_concentration)
     return path
 
 
@@ -464,11 +655,153 @@ def _save_study_config(run_dir: Path, payload: StudyConfigPayload) -> Path:
             "selected_residues": payload.selected_residues,
             "ks_factors":        payload.ks_factors,
         },
+        "ion_config": {
+            "salt_type":          payload.salt_type,
+            "salt_concentration": payload.salt_concentration,
+            "box_shape":          payload.box_shape,
+        },
     }
     config_path = run_dir / "config.toml"
     config_path.write_bytes(tomli_w.dumps(config).encode())
     logger.info("config.toml written to %s", config_path)
     return config_path
+
+
+
+# ---------------------------------------------------------------------------
+# Charge scaling + ParmEd ion neutralization
+# ---------------------------------------------------------------------------
+
+
+def _neutralize_charges_parmed(
+    prmtop_path: Path,
+    rst7_path: Path,
+    selected_residues: list[int],
+    ks_factor: float,
+    salt_type: str,
+    output_prmtop: Path,
+    output_rst7: Path,
+) -> tuple[float, float, int]:
+    """
+    Apply charge scaling factor *ks_factor* to the selected residues, then
+    redistribute the resulting charge imbalance equally across all ion atoms
+    so that the system's net charge returns exactly to 0.0.
+
+    Algorithm
+    ---------
+    1. Load the AMBER topology (sys.prmtop / sys.rst7) with ParmEd.
+    2. Measure Q_initial (must be ≈ 0.0 after TLeap solvation/neutralization).
+    3. Scale the partial charges of every atom in *selected_residues* by
+       *ks_factor*.
+    4. Measure Q_scaled = Σ(all atom charges).
+    5. ΔQ = Q_scaled − Q_initial.
+    6. Collect all ion atoms whose residue name matches the chosen salt type.
+    7. Distribute correction equally: each ion charge += −ΔQ / n_ions.
+    8. Write the modified topology to *output_prmtop* / *output_rst7*.
+
+    Examples
+    --------
+    Example 1 — scaling a Lysine (+1 → +0.8, ks=0.8):
+        The system loses +0.2 charge  (ΔQ = −0.2).
+        With 20 ions (10 Na+, 10 Cl−): correction = +0.2/20 = +0.01 per ion.
+
+    Example 2 — scaling a Glutamate (−1 → −0.6, ks=0.6):
+        The system gains +0.4 charge  (ΔQ = +0.4).
+        With 20 ions: correction = −0.4/20 = −0.02 per ion.
+
+    Returns
+    -------
+    (q_initial, q_scaled, n_ions)
+    """
+    import parmed as pmd
+
+    struct: pmd.amber.AmberParm = pmd.load_file(str(prmtop_path), str(rst7_path))
+
+    # Step 1 — measure initial net charge
+    q_initial: float = round(sum(a.charge for a in struct.atoms), 6)
+    logger.debug("ParmEd: Q_initial = %.6f", q_initial)
+
+    # Step 2 — build a set of residue SEQUENCE NUMBERS to scale
+    # ParmEd residues are 0-indexed; PDB residue numbers come from a.residue.number
+    residue_set: set[int] = set(selected_residues)
+
+    # Step 3 — apply Ks scaling
+    scaled_count = 0
+    for atom in struct.atoms:
+        if atom.residue.number in residue_set:
+            atom.charge *= ks_factor
+            scaled_count += 1
+    logger.debug("ParmEd: scaled %d atoms by %.4f", scaled_count, ks_factor)
+
+    # Step 4 — measure scaled net charge
+    q_scaled: float = sum(a.charge for a in struct.atoms)
+
+    # Step 5 — excess charge
+    delta_q: float = q_scaled - q_initial
+    logger.debug("ParmEd: Q_scaled = %.6f  ΔQ = %.6f", q_scaled, delta_q)
+
+    # Step 6 — collect ion atoms for this salt type
+    pos_name, neg_name = SALT_ION_NAMES[salt_type]
+    pos_aliases: set[str] = AMBER_ION_ALIASES.get(pos_name, {pos_name})
+    neg_aliases: set[str] = AMBER_ION_ALIASES.get(neg_name, {neg_name})
+    all_ion_names: set[str] = pos_aliases | neg_aliases
+
+    ion_atoms = [a for a in struct.atoms if a.residue.name in all_ion_names]
+    n_ions = len(ion_atoms)
+
+    if n_ions == 0:
+        logger.warning(
+            "ParmEd: no ion atoms found for salt=%s — charge imbalance %.6f "
+            "cannot be redistributed.  This usually means TLeap solvation "
+            "did not run (no box in topology).",
+            salt_type, delta_q,
+        )
+    else:
+        # Step 7 — redistribute correction equally
+        correction_per_ion: float = -delta_q / n_ions
+        for ion in ion_atoms:
+            ion.charge += correction_per_ion
+        q_final = sum(a.charge for a in struct.atoms)
+        logger.debug(
+            "ParmEd: distributed %.6f across %d ions (%.8f each)  "
+            "Q_final = %.10f",
+            -delta_q, n_ions, correction_per_ion, q_final,
+        )
+
+    # Step 8 — save modified topology
+    output_prmtop.parent.mkdir(parents=True, exist_ok=True)
+    struct.save(str(output_prmtop), overwrite=True)
+    struct.save(str(output_rst7),   overwrite=True)
+
+    return q_initial, q_scaled, n_ions
+
+
+class GenerateReplicasPayload(BaseModel):
+    """Payload for POST /api/study/generate."""
+
+    run_id:            str
+    selected_residues: list[int]
+    ks_factors:        list[float]
+    salt_type:         str   = "NaCl"
+    salt_concentration: float = 0.0
+    box_shape:          str   = "box"
+
+    @field_validator("run_id")
+    @classmethod
+    def _v_run_id(cls, v: str) -> str:
+        if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,80}", v):
+            raise ValueError("Invalid run_id format.")
+        return v
+
+    @field_validator("ks_factors")
+    @classmethod
+    def _v_ks(cls, v: list[float]) -> list[float]:
+        if not v:
+            raise ValueError("At least one Ks factor is required.")
+        for f in v:
+            if not (0.0 <= f <= 1.0):
+                raise ValueError(f"Ks factor {f} out of range [0, 1].")
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -647,7 +980,16 @@ async def upload_pdb(
         pdb_to_serve  = "with_H.pdb"
         tleap_ok      = True
 
-    logger.info("Residues detected: %d  run_id=%s", residue_count, run_id)
+    # Parse ion counts reported by TLeap in its stdout
+    ions_added: dict[str, int] = {}
+    if tleap_ok and tleap_stdout:
+        ions_added = _parse_ions_from_tleap_log(tleap_stdout)
+    total_ions = sum(ions_added.values())
+
+    logger.info(
+        "Residues detected: %d  ions_added: %s  run_id=%s",
+        residue_count, ions_added, run_id,
+    )
 
     return JSONResponse(
         status_code=status.HTTP_201_CREATED,
@@ -663,5 +1005,95 @@ async def upload_pdb(
             "tleap_ok":          tleap_ok,
             "tleap_error":       tleap_error,
             "tleap_stdout":      tleap_stdout[:2000] if tleap_stdout else None,
+            "ions_added":        ions_added,
+            "total_ions":        total_ions,
+        },
+    )
+
+@app.post(
+    "/api/study/generate",
+    summary="Generate scaled charge replicas with ParmEd neutralization",
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_replicas(payload: GenerateReplicasPayload) -> JSONResponse:
+    """
+    For each Ks factor in *payload.ks_factors*, produce a charge-scaled AMBER
+    topology replica under ``<run_dir>/replicas/k_<ks>/``.
+
+    Steps per replica
+    -----------------
+    1. Copy sys.prmtop + sys.rst7 from the run directory.
+    2. Call ``_neutralize_charges_parmed`` to apply Ks scaling and redistribute
+       the resulting charge imbalance across all ion atoms.
+    3. Write the modified topology as ``scaled.prmtop`` and ``scaled.rst7``.
+    4. Return a summary of each replica (Ks, paths, Q values, n_ions).
+
+    Requires that TLeap has already run successfully (sys.prmtop must exist).
+    If sys.prmtop is absent (e.g., TLeap was not available), returns HTTP 409.
+    """
+    run_dir = _resolve_run_dir(payload.run_id)
+    prmtop  = run_dir / "sys.prmtop"
+    rst7    = run_dir / "sys.rst7"
+
+    if not prmtop.is_file() or not rst7.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "sys.prmtop / sys.rst7 not found in this run directory.  "
+                "TLeap solvation must complete successfully before generating replicas."
+            ),
+        )
+
+    replicas: list[dict] = []
+
+    for ks in payload.ks_factors:
+        # Replica directory name: k_0_8 for ks=0.8, k_1_0 for ks=1.0
+        label     = f"k_{str(round(ks, 4)).replace('.', '_')}"
+        replica_dir = run_dir / "replicas" / label
+        replica_dir.mkdir(parents=True, exist_ok=True)
+
+        out_prmtop = replica_dir / "scaled.prmtop"
+        out_rst7   = replica_dir / "scaled.rst7"
+
+        try:
+            q_initial, q_scaled, n_ions = _neutralize_charges_parmed(
+                prmtop_path       = prmtop,
+                rst7_path         = rst7,
+                selected_residues = payload.selected_residues,
+                ks_factor         = ks,
+                salt_type         = payload.salt_type,
+                output_prmtop     = out_prmtop,
+                output_rst7       = out_rst7,
+            )
+            replicas.append({
+                "ks":         ks,
+                "label":      label,
+                "prmtop":     str(out_prmtop.relative_to(PROJECT_ROOT.parent)),
+                "rst7":       str(out_rst7.relative_to(PROJECT_ROOT.parent)),
+                "q_initial":  round(q_initial, 6),
+                "q_scaled":   round(q_scaled, 6),
+                "delta_q":    round(q_scaled - q_initial, 6),
+                "n_ions":     n_ions,
+                "status":     "ok",
+            })
+            logger.info(
+                "Replica generated  label=%s  ks=%.4f  n_ions=%d  run_id=%s",
+                label, ks, n_ions, payload.run_id,
+            )
+        except Exception as exc:
+            logger.error("Replica failed  label=%s  error=%s", label, exc)
+            replicas.append({
+                "ks":     ks,
+                "label":  label,
+                "status": "error",
+                "error":  str(exc),
+            })
+
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content={
+            "status":   "ok",
+            "run_id":   payload.run_id,
+            "replicas": replicas,
         },
     )

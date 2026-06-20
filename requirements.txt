@@ -8,3 +8,4 @@ python-multipart==0.0.17
 aiofiles==24.1.0
 rdkit>=2023.9.1
 tomli-w>=1.0.0
+parmed>=4.0.0

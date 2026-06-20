@@ -18,6 +18,12 @@
 {% endmacro %}
 
 {% block extra_head %}
+<style>
+  /* Suppress intrusive spinner arrows on number inputs */
+  .run-num-input::-webkit-inner-spin-button,
+  .run-num-input::-webkit-outer-spin-button { opacity: 0.15; }
+  .run-num-input[type=number] { -moz-appearance: textfield; }
+</style>
 <script src="https://unpkg.com/ngl@2.3.1/dist/ngl.js"></script>
 {% endblock %}
 
@@ -350,7 +356,7 @@
                    placeholder="Custom…"
                    class="flex-1 rounded-lg border border-surface-700 bg-surface-900 px-3 py-1.5 text-sm
                           font-mono text-gray-100 placeholder:text-surface-700
-                          focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30 transition-colors"/>
+                          focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30 transition-colors run-num-input"/>
             <button id="ks-add-btn"
               class="rounded-lg px-3 py-1.5 border border-surface-700 text-xs font-mono text-text-dim
                      hover:border-accent/50 hover:text-accent transition-all duration-150">
@@ -367,7 +373,110 @@
     </div>
     <!-- end two-column grid -->
 
-    <!-- Initialize Study button -->
+    <!-- ══════════════════════════════════════════════════════════════════
+         Ion Configuration subsection
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="mt-8 border-t border-surface-700 pt-6">
+      <div class="flex items-center gap-3 mb-5">
+        <svg class="h-4 w-4 text-accent shrink-0" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83
+                   M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+        </svg>
+        <h3 class="text-sm font-medium text-gray-300">Ion Configuration</h3>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+        <!-- Salt type -->
+        <div class="flex flex-col gap-1.5">
+          <label for="select-salt-type"
+            class="text-xs font-medium text-text-dim tracking-wide uppercase">
+            Salt Type
+          </label>
+          <div class="relative">
+            <select id="select-salt-type"
+              class="w-full rounded-lg border border-surface-700 bg-surface-900
+                     px-3 py-2 text-sm font-mono text-gray-100
+                     focus:outline-none focus:border-accent/60 focus:ring-1
+                     focus:ring-accent/30 transition-colors appearance-none
+                     cursor-pointer">
+              <option value="NaCl"  selected>NaCl — Sodium Chloride</option>
+              <option value="KCl">KCl  — Potassium Chloride</option>
+              <option value="MgCl2">MgCl&#8322; — Magnesium Chloride</option>
+            </select>
+            <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2
+                        h-3.5 w-3.5 text-text-dim" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Salt concentration -->
+        <div class="flex flex-col gap-1.5">
+          <label for="input-salt-conc"
+            class="text-xs font-medium text-text-dim tracking-wide uppercase">
+            Salt Concentration (mol/L)
+          </label>
+          <input id="input-salt-conc" type="number"
+            min="0" max="5" step="0.05" value="0"
+            class="rounded-lg border border-surface-700 bg-surface-900
+                   px-3 py-2 text-sm font-mono text-gray-100
+                   focus:outline-none focus:border-accent/60 focus:ring-1
+                   focus:ring-accent/30 transition-colors run-num-input"
+            aria-describedby="salt-conc-hint"
+          />
+          <p id="salt-conc-hint" class="text-xs text-text-dim font-mono">
+            <span class="text-accent">0</span> = neutralize only
+            (no extra salt added)
+          </p>
+        </div>
+
+
+        <!-- Solvent box shape -->
+        <div class="flex flex-col gap-1.5">
+          <label for="select-box-shape"
+            class="text-xs font-medium text-text-dim tracking-wide uppercase">
+            Solvent Box Shape
+          </label>
+          <div class="relative">
+            <select id="select-box-shape"
+              class="w-full rounded-lg border border-surface-700 bg-surface-900
+                     px-3 py-2 text-sm font-mono text-gray-100
+                     focus:outline-none focus:border-accent/60 focus:ring-1
+                     focus:ring-accent/30 transition-colors appearance-none
+                     cursor-pointer">
+              <option value="box" selected>Rectangular Box</option>
+              <option value="oct">Truncated Octahedron</option>
+            </select>
+            <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2
+                        h-3.5 w-3.5 text-text-dim" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </div>
+          <p class="text-xs text-text-dim font-mono">
+            Octahedron uses <span class="text-accent">~20%</span> less water
+          </p>
+        </div>
+
+      </div>
+
+      <!-- Ion count report label (populated after TLeap runs) -->
+      <div id="ion-count-label"
+        class="mt-3 hidden items-center gap-2 font-mono text-xs text-text-dim">
+        <svg class="h-3 w-3 text-accent shrink-0" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="12" r="4"/>
+        </svg>
+        <span id="ion-count-text"></span>
+      </div>
+
+    </div>
+    <!-- end Ion Configuration -->
+
+    <!-- Confirm Configuration button -->
     <div class="mt-8 border-t border-surface-700 pt-6 flex items-center gap-4">
       <button id="init-study-btn"
         class="flex items-center gap-2 rounded-lg px-7 py-2.5
@@ -379,7 +488,7 @@
           <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
           <polyline points="22 4 12 14.01 9 11.01"/>
         </svg>
-        Initialize Study
+        Confirm Configuration
       </button>
       <div id="init-status" class="hidden items-center gap-2 font-mono text-xs">
         <span id="init-status-dot" class="inline-block h-2 w-2 rounded-full bg-accent animate-pulse"></span>
@@ -636,6 +745,13 @@
   const initSuccessPath   = document.getElementById("init-success-path");
   const section3Placeholder = document.getElementById("section3-placeholder");
 
+  // Ion configuration controls
+  const selectSaltType  = document.getElementById("select-salt-type");
+  const inputSaltConc   = document.getElementById("input-salt-conc");
+  const selectBoxShape  = document.getElementById("select-box-shape");
+  const ionCountLabel   = document.getElementById("ion-count-label");
+  const ionCountText    = document.getElementById("ion-count-text");
+
   // ── State ─────────────────────────────────────────────────────────────────
   /** @type {object|null} */    let runMeta        = null;
   /** @type {number} */         let totalResidues  = 0;
@@ -683,6 +799,8 @@
       tleapPillText.className   = "font-mono text-xs text-yellow-400";
     }
 
+    // Show ion count label when TLeap reports ions
+    // Ion count label is populated only after "Confirm Configuration" succeeds.
     _renderKsGrid();
 
     setTimeout(() => sectionEl.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
@@ -1006,7 +1124,7 @@
 
   ksCustomInput.addEventListener("keydown", (e) => { if (e.key === "Enter") ksAddBtn.click(); });
 
-  // ── Initialize Study ─────────────────────────────────────────────────────
+  // ── Confirm Configuration ──────────────────────────────────────────────────
 
   function _setInitStatus(msg, pulsing = true) {
     initStatus.classList.toggle("hidden", !msg);
@@ -1041,6 +1159,9 @@
       total_residues:     totalResidues,
       selected_residues:  validResidues,
       ks_factors:         [...ksSelected].sort((a, b) => b - a),
+      salt_type:          selectSaltType ? selectSaltType.value : "NaCl",
+      salt_concentration: parseFloat(inputSaltConc ? inputSaltConc.value : "0") || 0,
+      box_shape:          selectBoxShape ? selectBoxShape.value : "box",
     };
 
     try {
@@ -1078,6 +1199,9 @@
     getResidueMap:     () => residueMap,
     getKsFactors:      () => [...ksSelected].sort((a, b) => b - a),
     getNGLStage:       () => nglStage,
+    getSaltType:       () => selectSaltType  ? selectSaltType.value  : "NaCl",
+    getSaltConc:       () => parseFloat(inputSaltConc  ? inputSaltConc.value  : "0") || 0,
+    getBoxShape:       () => selectBoxShape  ? selectBoxShape.value  : "box",
   };
 
 }());
