@@ -186,6 +186,90 @@ class StudyConfigPayload(BaseModel):
                 raise ValueError(f"Ks factor {f} is out of range [0, 1].")
         return v
 
+
+class MinimizationStageConfig(BaseModel):
+    """
+    Configuration for a single Minimization stage in the MD protocol pipeline.
+
+    Engine-level flags (imin, ntb, ntp, ntf, ntc, ntxo) are hardcoded by the
+    backend for all minimization stages and are NOT accepted from the client.
+    """
+
+    label:               str   # e.g. "Min-1" — auto-assigned by frontend ordering
+    stage_type:          str = "minimization"
+    maxcyc:              int = 5000
+    ncyc:                int = 2500
+    ntwr:                int = 500
+    ntpr:                int = 50
+    restraint_enabled:   bool  = False
+    restraint_wt:        float = 10.0
+    restraintmask:       str   = ""
+
+    @field_validator("stage_type")
+    @classmethod
+    def _validate_stage_type(cls, v: str) -> str:
+        allowed = {"minimization"}   # extended in future prompts (heat, production)
+        if v not in allowed:
+            raise ValueError(f"stage_type must be one of {allowed}.")
+        return v
+
+    @field_validator("maxcyc", "ncyc", "ntwr", "ntpr")
+    @classmethod
+    def _validate_positive_int(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Cycle/report counters must be >= 1.")
+        return v
+
+    @field_validator("restraint_wt")
+    @classmethod
+    def _validate_restraint_wt(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("restraint_wt must be >= 0.")
+        return v
+
+
+class GlobalMDConfig(BaseModel):
+    """Global settings shared by every stage in the MD protocol."""
+
+    cut:   float = 12.0
+    iwrap: int   = 1
+
+    @field_validator("cut")
+    @classmethod
+    def _validate_cut(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("cut must be > 0.")
+        return v
+
+    @field_validator("iwrap")
+    @classmethod
+    def _validate_iwrap(cls, v: int) -> int:
+        if v not in (0, 1):
+            raise ValueError("iwrap must be 0 or 1.")
+        return v
+
+
+class MDProtocolPayload(BaseModel):
+    """Payload for POST /api/study/md-protocol."""
+
+    run_id: str
+    global_config: GlobalMDConfig
+    stages: list[MinimizationStageConfig]
+
+    @field_validator("run_id")
+    @classmethod
+    def _validate_run_id(cls, v: str) -> str:
+        if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,80}", v):
+            raise ValueError("Invalid run_id format.")
+        return v
+
+    @field_validator("stages")
+    @classmethod
+    def _validate_stages(cls, v: list["MinimizationStageConfig"]) -> list["MinimizationStageConfig"]:
+        if not v:
+            raise ValueError("At least one pipeline stage is required.")
+        return v
+
 class IonConfig(BaseModel):
     """Ion configuration submitted alongside study config."""
 
@@ -804,6 +888,102 @@ class GenerateReplicasPayload(BaseModel):
         return v
 
 
+
+# ---------------------------------------------------------------------------
+# MD Protocol — AMBER input file (.in) generation
+# ---------------------------------------------------------------------------
+
+
+def _render_minimization_stage(
+    stage: "MinimizationStageConfig",
+    global_cfg: "GlobalMDConfig",
+) -> str:
+    """
+    Render a single AMBER &cntrl namelist block for a Minimization stage.
+
+    Structural engine flags are hardcoded and never taken from client input:
+        imin=1   — run a minimization (not MD)
+        ntb=1    — constant volume periodic boundary
+        ntp=0    — no pressure scaling during minimization
+        ntf=1    — complete force evaluation
+        ntc=1    — no SHAKE bond-length constraints
+        ntxo=1   — formatted (ASCII) restart file
+
+    Variable fields (maxcyc, ncyc, ntpr, ntwr) come from the stage config;
+    cut and iwrap come from the shared global config so every stage in the
+    pipeline uses the same cutoff and wrapping behaviour.
+
+    When stage.restraint_enabled is True, a positional-restraint block is
+    appended: ntr=1, restraint_wt=<wt>, restraintmask="<mask>".
+    """
+    lines = [
+        "&cntrl",
+        (
+            f"imin=1, maxcyc={stage.maxcyc}, ncyc={stage.ncyc}, ntb=1, ntp=0, "
+            f"ntf=1, ntc=1, ntpr={stage.ntpr}, iwrap={global_cfg.iwrap}, "
+            f"ntwr={stage.ntwr}, cut={global_cfg.cut}, ntxo=1,"
+        ),
+    ]
+    if stage.restraint_enabled:
+        lines.append(
+            f'ntr=1, restraint_wt={stage.restraint_wt}, '
+            f'restraintmask="{stage.restraintmask}",'
+        )
+    lines.append("/")
+    return "\n".join(lines) + "\n"
+
+
+def _render_stage(stage: "MinimizationStageConfig", global_cfg: "GlobalMDConfig") -> str:
+    """
+    Dispatch to the correct renderer based on stage_type.
+
+    Currently only "minimization" is implemented; future prompts will add
+    "heating" and "production" branches here.
+    """
+    if stage.stage_type == "minimization":
+        return _render_minimization_stage(stage, global_cfg)
+    raise ValueError(f"Unsupported stage_type: {stage.stage_type!r}")
+
+
+# Maps stage_type -> the short token used in generated filenames.
+# This is independent of the stage's UI display label (e.g. "Min-1", "Min-2"):
+# the filename only needs to say *what kind* of stage it is, since the
+# leading sequence number already encodes its position in the pipeline.
+STAGE_TYPE_FILE_TOKEN: dict[str, str] = {
+    "minimization": "Min",
+    # "heating":     "Heat",      # reserved for a future prompt
+    # "production":  "Prod",      # reserved for a future prompt
+}
+
+
+def _write_md_protocol_files(run_dir: Path, payload: "MDProtocolPayload") -> list[Path]:
+    """
+    Write one AMBER .in file per pipeline stage into *run_dir*, using a shared
+    sequential, zero-padded naming scheme: ``01_Min.in``, ``02_Min.in``,
+    ``03_Heat.in``, …
+
+    The filename token comes from the stage's *type* (via
+    STAGE_TYPE_FILE_TOKEN), not from its UI display label — whether a stage
+    is the 1st or 3rd Minimization in the pipeline doesn't change its
+    filename, only its position-based sequence number does.
+
+    These files live in the run's top-level directory (NOT per-Ks-replica)
+    because the same MD protocol is reused for every charge-scaling replica.
+
+    Returns the list of written file paths, in pipeline order.
+    """
+    written: list[Path] = []
+    for idx, stage in enumerate(payload.stages, start=1):
+        content   = _render_stage(stage, payload.global_config)
+        token     = STAGE_TYPE_FILE_TOKEN.get(stage.stage_type, stage.stage_type)
+        filename  = f"{idx:02d}_{token}.in"
+        file_path = run_dir / filename
+        file_path.write_text(content)
+        written.append(file_path)
+        logger.debug("MD stage written: %s", file_path)
+    return written
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -1095,5 +1275,50 @@ async def generate_replicas(payload: GenerateReplicasPayload) -> JSONResponse:
             "status":   "ok",
             "run_id":   payload.run_id,
             "replicas": replicas,
+        },
+    )
+
+@app.post(
+    "/api/study/md-protocol",
+    summary="Generate AMBER MD protocol input files (.in) for the pipeline",
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_md_protocol(payload: MDProtocolPayload) -> JSONResponse:
+    """
+    Write one AMBER .in file per pipeline stage into the run's top-level
+    directory.  These files are shared across every Ks charge-scaling
+    replica — the same minimization/equilibration/production protocol
+    applies regardless of which residues were scaled.
+
+    Naming scheme: ``<NN>_<label>.in`` where NN is the 1-indexed, zero-padded
+    sequence position and <label> is the stage's auto-assigned name
+    (e.g. "Min", "Heat").
+
+    Returns the list of generated files (relative paths) in pipeline order.
+    """
+    run_dir = _resolve_run_dir(payload.run_id)
+
+    try:
+        written_paths = _write_md_protocol_files(run_dir, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+
+    logger.info(
+        "MD protocol generated  run_id=%s  stages=%d",
+        payload.run_id, len(written_paths),
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content={
+            "status":  "ok",
+            "run_id":  payload.run_id,
+            "files": [
+                str(p.relative_to(PROJECT_ROOT.parent)) for p in written_paths
+            ],
+            "stage_count": len(written_paths),
         },
     )

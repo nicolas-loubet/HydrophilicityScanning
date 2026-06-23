@@ -506,15 +506,109 @@
     </div>
 
     <!-- ── PLACEHOLDER: Section 3 (MD Parameters) ─────────────────────────── -->
-    <div id="section3-placeholder" class="mt-6 hidden">
-      <div class="rounded-xl border border-dashed border-surface-700 bg-surface-900/30 px-6 py-8 text-center">
-        <p class="font-mono text-xs text-surface-700 tracking-widest uppercase">
-          [ Section 3: MD Parameters — coming next ]
-        </p>
+    <div id="section3-placeholder" class="mt-6 hidden"></div>
+
+  </div><!-- end section-study-inner -->
+</section>
+
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     SECTION 3 — Molecular Dynamics Protocol
+     ════════════════════════════════════════════════════════════════════════ -->
+<section
+  id="section-md-protocol"
+  class="rounded-xl border border-surface-700 bg-surface-800 p-8 hidden"
+>
+  <div class="flex items-center gap-4 mb-6">
+    <span class="font-mono text-xs font-bold text-surface-900 bg-accent px-2 py-0.5 rounded select-none">03</span>
+    <div>
+      <h2 class="text-base font-semibold tracking-wide text-gray-100">Molecular Dynamics Protocol</h2>
+      <p class="text-xs text-text-dim mt-0.5">
+        Build the sequential AMBER pipeline shared by every K<sub>s</sub> replica
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Global Configuration card ───────────────────────────────────────── -->
+  <div class="rounded-lg border border-surface-700 bg-surface-900/50 p-5 mb-6">
+    <h3 class="text-sm font-medium text-gray-300 mb-4">Global Configuration</h3>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div class="flex flex-col gap-1.5">
+        <label for="global-cut-input"
+          class="text-xs font-medium text-text-dim tracking-wide uppercase">
+          Global Cutoff (cut, &Aring;)
+        </label>
+        <input id="global-cut-input" type="number" step="0.5" min="0" value="12.0"
+          class="run-num-input rounded-lg border border-surface-700 bg-surface-900
+                 px-3 py-2 text-sm font-mono text-gray-100
+                 focus:outline-none focus:border-accent/60 focus:ring-1
+                 focus:ring-accent/30 transition-colors" />
       </div>
     </div>
 
-  </div><!-- end section-study-inner -->
+    <!-- Advanced Settings accordion -->
+    <div class="mt-4 border-t border-surface-700 pt-3">
+      <button type="button" id="global-advanced-toggle"
+        class="flex items-center gap-2 text-xs font-mono text-text-dim
+               hover:text-accent transition-colors">
+        <svg id="global-advanced-chevron" class="h-3 w-3 transition-transform duration-200"
+             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+        Advanced Settings
+      </button>
+      <div id="global-advanced-panel" class="hidden mt-3 pl-1">
+        <div class="flex flex-col gap-1.5 max-w-xs">
+          <label for="global-iwrap-input"
+            class="text-xs font-medium text-text-dim tracking-wide uppercase">
+            iwrap
+          </label>
+          <select id="global-iwrap-input"
+            class="rounded-lg border border-surface-700 bg-surface-900
+                   px-3 py-2 text-sm font-mono text-gray-100
+                   focus:outline-none focus:border-accent/60 focus:ring-1
+                   focus:ring-accent/30 transition-colors cursor-pointer">
+            <option value="1" selected>1 — wrap coordinates into primary box</option>
+            <option value="0">0 — do not wrap</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Sequential Pipeline Builder ─────────────────────────────────────── -->
+  <div id="md-pipeline-stack" class="flex flex-col">
+    <!-- Stage cards + insertion "+" buttons are injected here by JS -->
+  </div>
+
+  <!-- ── Generate MD Inputs button ────────────────────────────────────────── -->
+  <div class="mt-8 border-t border-surface-700 pt-6 flex items-center gap-4">
+    <button id="generate-md-btn"
+      class="flex items-center gap-2 rounded-lg px-7 py-2.5
+             bg-accent text-surface-900 font-semibold text-sm
+             transition-all duration-200
+             disabled:opacity-30 disabled:cursor-not-allowed
+             hover:bg-accent-dim active:scale-95 shadow-amber-glow">
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+      </svg>
+      Generate MD Inputs
+    </button>
+    <div id="md-gen-status" class="hidden items-center gap-2 font-mono text-xs">
+      <span id="md-gen-status-dot" class="inline-block h-2 w-2 rounded-full bg-accent animate-pulse"></span>
+      <span id="md-gen-status-text" class="text-text-dim"></span>
+    </div>
+  </div>
+
+  <div id="md-gen-error-box" class="hidden mt-4 rounded-lg border border-red-900/60 bg-red-950/30 px-4 py-3">
+    <p class="text-xs font-mono text-red-400" id="md-gen-error-text"></p>
+  </div>
+  <div id="md-gen-success-box" class="hidden mt-4 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 space-y-1">
+    <p class="text-xs text-gray-300 font-mono">MD protocol generated successfully.</p>
+    <p class="text-xs font-mono text-accent" id="md-gen-success-files"></p>
+  </div>
+
 </section>
 
 {% endblock %}
@@ -1178,9 +1272,13 @@
       initSuccessPath.textContent    = data.config_path;
       initSuccessBox.classList.remove("hidden");
 
-      // Reveal Section 3 placeholder
-      section3Placeholder.classList.remove("hidden");
-      setTimeout(() => section3Placeholder.scrollIntoView({ behavior: "smooth", block: "nearest" }), 400);
+      // Reveal Section 3 (MD Protocol) and hand off the run_id
+      const section3 = document.getElementById("section-md-protocol");
+      if (section3) {
+        section3.classList.remove("hidden");
+        if (window.HydroMD) window.HydroMD.setRunId(runMeta.run_id, totalResidues);
+        setTimeout(() => section3.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+      }
 
     } catch (err) {
       initErrorText.textContent = err.message || "Unknown error.";
@@ -1202,6 +1300,432 @@
     getSaltType:       () => selectSaltType  ? selectSaltType.value  : "NaCl",
     getSaltConc:       () => parseFloat(inputSaltConc  ? inputSaltConc.value  : "0") || 0,
     getBoxShape:       () => selectBoxShape  ? selectBoxShape.value  : "box",
+  };
+
+}());
+</script>
+
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     MODULE 3 — HydroMD
+     Manages Section 3: the sequential Minimization pipeline card builder,
+     hover-activated insertion controls, auto-renaming, and protocol submit.
+     Exposes: window.HydroMD
+     ════════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  "use strict";
+
+  // ── DOM refs ─────────────────────────────────────────────────────────────
+  const pipelineStack       = document.getElementById("md-pipeline-stack");
+  const globalCutInput      = document.getElementById("global-cut-input");
+  const globalIwrapInput    = document.getElementById("global-iwrap-input");
+  const globalAdvToggle     = document.getElementById("global-advanced-toggle");
+  const globalAdvChevron    = document.getElementById("global-advanced-chevron");
+  const globalAdvPanel      = document.getElementById("global-advanced-panel");
+  const generateMdBtn       = document.getElementById("generate-md-btn");
+  const mdGenStatus         = document.getElementById("md-gen-status");
+  const mdGenStatusDot      = document.getElementById("md-gen-status-dot");
+  const mdGenStatusText     = document.getElementById("md-gen-status-text");
+  const mdGenErrorBox       = document.getElementById("md-gen-error-box");
+  const mdGenErrorText      = document.getElementById("md-gen-error-text");
+  const mdGenSuccessBox     = document.getElementById("md-gen-success-box");
+  const mdGenSuccessFiles   = document.getElementById("md-gen-success-files");
+
+  // ── State ────────────────────────────────────────────────────────────────
+  /** @type {string|null}  Current run_id, set by HydroStudy after Confirm Configuration. */
+  let currentRunId = null;
+  /** @type {number}  Total residue count, used to build the default restraintmask. */
+  let totalResidueCount = 0;
+  /** @type {Array<object>}  Ordered in-memory stage model. Each entry:
+   *  { uid, type: "minimization", maxcyc, ncyc, ntwr, ntpr,
+   *    restraintEnabled, restraintWt, restraintMask }
+   */
+  let stages = [];
+  /** @type {number}  Monotonic counter for generating unique stage uids. */
+  let uidCounter = 0;
+
+  // ── Defaults ─────────────────────────────────────────────────────────────
+
+  function _defaultRestraintMask() {
+    const n = totalResidueCount > 0 ? totalResidueCount : 1;
+    return `(:1-${n} & !:WAT & !@H=)`;
+  }
+
+  function _newMinimizationStage(restraintEnabled) {
+    uidCounter += 1;
+    return {
+      uid:              `stage-${uidCounter}`,
+      type:             "minimization",
+      maxcyc:           5000,
+      ncyc:             2500,
+      ntwr:             500,
+      ntpr:             50,
+      restraintEnabled: restraintEnabled,
+      restraintWt:      10.0,
+      restraintMask:    _defaultRestraintMask(),
+    };
+  }
+
+  // ── Public entry point — called by HydroStudy after Confirm Configuration ─
+
+  function setRunId(runId, residueCount) {
+    currentRunId      = runId;
+    totalResidueCount = residueCount || 0;
+
+    // Pre-load the default two-card pipeline only once, on first activation.
+    if (stages.length === 0) {
+      stages.push(_newMinimizationStage(true));   // Min-1 — restraints ON
+      stages.push(_newMinimizationStage(false));  // Min-2 — restraints OFF
+      _renderPipeline();
+    }
+  }
+
+  // ── Auto-renaming ────────────────────────────────────────────────────────
+
+  /** Recompute "Min-N" labels for every stage in current order. */
+  function _relabel() {
+    let minCount = 0;
+    stages.forEach((s) => {
+      if (s.type === "minimization") {
+        minCount += 1;
+        s.label = `Min-${minCount}`;
+      }
+    });
+  }
+
+  // ── Rendering ────────────────────────────────────────────────────────────
+
+  /** Build one insertion "+" control. Calling insertAt(index) on click. */
+  function _buildInsertControl(index) {
+    const wrap = document.createElement("div");
+    wrap.className = "group relative h-6 flex items-center justify-center";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Insert minimization stage here");
+    btn.className =
+      "opacity-0 group-hover:opacity-100 focus:opacity-100 " +
+      "transition-opacity duration-150 " +
+      "h-6 w-6 rounded-full bg-surface-700 hover:bg-accent " +
+      "text-text-dim hover:text-surface-900 " +
+      "flex items-center justify-center text-sm font-bold " +
+      "shadow-sm";
+    btn.textContent = "+";
+    btn.addEventListener("click", () => _insertStageAt(index));
+
+    // Hover-extend zone: enlarges the hit area above/below so the button is
+    // easy to discover when moving the mouse between cards.
+    const hoverZone = document.createElement("div");
+    hoverZone.className = "absolute inset-x-0 -top-3 -bottom-3";
+    hoverZone.addEventListener("mouseenter", () => btn.classList.add("opacity-100"));
+    hoverZone.addEventListener("mouseleave", () => btn.classList.remove("opacity-100"));
+
+    wrap.appendChild(hoverZone);
+    wrap.appendChild(btn);
+    return wrap;
+  }
+
+  /** Build the DOM card for a single stage object. */
+  function _buildStageCard(stage, index) {
+    const card = document.createElement("div");
+    card.className =
+      "rounded-lg border border-surface-700 bg-surface-900/50 p-5 " +
+      "transition-colors duration-200";
+    card.dataset.uid = stage.uid;
+
+    // ── Header row: label + delete button ──────────────────────────────
+    const header = document.createElement("div");
+    header.className = "flex items-center justify-between mb-4";
+
+    const labelWrap = document.createElement("div");
+    labelWrap.className = "flex items-center gap-2";
+    const badge = document.createElement("span");
+    badge.className =
+      "font-mono text-xs font-bold text-accent border border-accent/40 " +
+      "rounded px-2 py-0.5 select-none";
+    badge.textContent = stage.label;
+    const stageType = document.createElement("span");
+    stageType.className = "text-xs text-text-dim font-mono";
+    stageType.textContent = "Minimization";
+    labelWrap.appendChild(badge);
+    labelWrap.appendChild(stageType);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.setAttribute("aria-label", `Delete ${stage.label}`);
+    deleteBtn.title = "Delete stage";
+    deleteBtn.className =
+      "text-text-dim hover:text-red-400 transition-colors p-1 rounded";
+    deleteBtn.innerHTML =
+      '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<polyline points="3 6 5 6 21 6"/>' +
+      '<path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>' +
+      '<path d="M10 11v6M14 11v6"/>' +
+      '</svg>';
+    deleteBtn.addEventListener("click", () => _deleteStage(stage.uid));
+
+    header.appendChild(labelWrap);
+    header.appendChild(deleteBtn);
+    card.appendChild(header);
+
+    // ── Standard inputs grid ─────────────────────────────────────────────
+    const grid = document.createElement("div");
+    grid.className = "grid grid-cols-1 sm:grid-cols-3 gap-4";
+
+    grid.appendChild(_buildNumberField(stage, "maxcyc", "maxcyc", 1, null, 1));
+    grid.appendChild(_buildNumberField(stage, "ncyc", "ncyc", 1, null, 1));
+    grid.appendChild(_buildNumberField(stage, "ntwr", "ntwr", 1, null, 1));
+
+    card.appendChild(grid);
+
+    // ── Restraints toggle + fields ────────────────────────────────────────
+    const restraintBlock = document.createElement("div");
+    restraintBlock.className = "mt-4 border-t border-surface-700 pt-4";
+
+    const toggleRow = document.createElement("div");
+    toggleRow.className = "flex items-center justify-between";
+
+    const toggleLabel = document.createElement("span");
+    toggleLabel.className = "text-xs font-medium text-text-dim tracking-wide uppercase";
+    toggleLabel.textContent = "Restraints";
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.setAttribute("role", "switch");
+    toggleBtn.setAttribute("aria-checked", String(stage.restraintEnabled));
+    toggleBtn.className =
+      "relative w-10 h-5 rounded-full transition-colors duration-200 " +
+      (stage.restraintEnabled ? "bg-accent" : "bg-surface-700");
+    const knob = document.createElement("span");
+    knob.className =
+      "absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-surface-900 " +
+      "transition-transform duration-200 " +
+      (stage.restraintEnabled ? "translate-x-5" : "translate-x-0");
+    toggleBtn.appendChild(knob);
+    toggleBtn.addEventListener("click", () => {
+      stage.restraintEnabled = !stage.restraintEnabled;
+      _renderPipeline();
+    });
+
+    toggleRow.appendChild(toggleLabel);
+    toggleRow.appendChild(toggleBtn);
+    restraintBlock.appendChild(toggleRow);
+
+    if (stage.restraintEnabled) {
+      const restraintFields = document.createElement("div");
+      restraintFields.className = "grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3";
+      restraintFields.appendChild(
+        _buildNumberField(stage, "restraintWt", "restraint_wt", 0, null, 0.5, true)
+      );
+      restraintFields.appendChild(
+        _buildTextField(stage, "restraintMask", "restraintmask")
+      );
+      restraintBlock.appendChild(restraintFields);
+    }
+
+    card.appendChild(restraintBlock);
+
+    // ── Advanced Settings accordion (ntpr) ───────────────────────────────
+    const advBlock = document.createElement("div");
+    advBlock.className = "mt-4 border-t border-surface-700 pt-3";
+
+    const advToggle = document.createElement("button");
+    advToggle.type = "button";
+    advToggle.className =
+      "flex items-center gap-2 text-xs font-mono text-text-dim hover:text-accent transition-colors";
+    const chevron = document.createElement("svg");
+    chevron.setAttribute("class", "h-3 w-3 transition-transform duration-200" + (stage._advOpen ? " rotate-90" : ""));
+    chevron.setAttribute("viewBox", "0 0 24 24");
+    chevron.setAttribute("fill", "none");
+    chevron.setAttribute("stroke", "currentColor");
+    chevron.setAttribute("stroke-width", "2");
+    chevron.innerHTML = '<polyline points="9 18 15 12 9 6"/>';
+    advToggle.appendChild(chevron);
+    advToggle.appendChild(document.createTextNode("Advanced Settings"));
+    advToggle.addEventListener("click", () => {
+      stage._advOpen = !stage._advOpen;
+      _renderPipeline();
+    });
+    advBlock.appendChild(advToggle);
+
+    if (stage._advOpen) {
+      const advPanel = document.createElement("div");
+      advPanel.className = "mt-3 pl-1 max-w-xs";
+      advPanel.appendChild(_buildNumberField(stage, "ntpr", "ntpr", 1, null, 1));
+      advBlock.appendChild(advPanel);
+    }
+
+    card.appendChild(advBlock);
+
+    return card;
+  }
+
+  /** Build a labelled numeric input bound to stage[field]. */
+  function _buildNumberField(stage, field, displayLabel, min, max, step, accent = false) {
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-col gap-1.5";
+
+    const label = document.createElement("label");
+    label.className = "text-xs font-medium text-text-dim tracking-wide uppercase";
+    label.textContent = displayLabel;
+
+    const input = document.createElement("input");
+    input.type  = "number";
+    if (min !== null) input.min = String(min);
+    if (max !== null) input.max = String(max);
+    if (step !== undefined) input.step = String(step);
+    input.value = String(stage[field]);
+    input.className =
+      "run-num-input rounded-lg border bg-surface-900 px-3 py-2 text-sm font-mono " +
+      "text-gray-100 focus:outline-none focus:ring-1 transition-colors " +
+      (accent
+        ? "border-accent/40 focus:border-accent/60 focus:ring-accent/30"
+        : "border-surface-700 focus:border-accent/60 focus:ring-accent/30");
+
+    input.addEventListener("input", () => {
+      const num = field === "restraintWt" ? parseFloat(input.value) : parseInt(input.value, 10);
+      stage[field] = Number.isFinite(num) ? num : stage[field];
+    });
+
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    return wrap;
+  }
+
+  /** Build a labelled text input bound to stage[field]. */
+  function _buildTextField(stage, field, displayLabel) {
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-col gap-1.5";
+
+    const label = document.createElement("label");
+    label.className = "text-xs font-medium text-text-dim tracking-wide uppercase";
+    label.textContent = displayLabel;
+
+    const input = document.createElement("input");
+    input.type  = "text";
+    input.value = stage[field];
+    input.className =
+      "rounded-lg border border-accent/40 bg-surface-900 px-3 py-2 text-sm font-mono " +
+      "text-gray-100 focus:outline-none focus:border-accent/60 focus:ring-1 " +
+      "focus:ring-accent/30 transition-colors";
+
+    input.addEventListener("input", () => { stage[field] = input.value; });
+
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    return wrap;
+  }
+
+  /** Full re-render of the pipeline stack: relabel, then rebuild DOM. */
+  function _renderPipeline() {
+    _relabel();
+    pipelineStack.innerHTML = "";
+
+    // Leading "+" — insert at position 0
+    pipelineStack.appendChild(_buildInsertControl(0));
+
+    stages.forEach((stage, idx) => {
+      pipelineStack.appendChild(_buildStageCard(stage, idx));
+      // "+" control after this card — insert at position idx + 1
+      pipelineStack.appendChild(_buildInsertControl(idx + 1));
+    });
+  }
+
+  // ── Stage mutation ───────────────────────────────────────────────────────
+
+  function _insertStageAt(index) {
+    const newStage = _newMinimizationStage(false);
+    stages.splice(index, 0, newStage);
+    _renderPipeline();
+  }
+
+  function _deleteStage(uid) {
+    if (stages.length <= 1) return;  // keep at least one stage
+    stages = stages.filter((s) => s.uid !== uid);
+    _renderPipeline();
+  }
+
+  // ── Global Advanced Settings accordion ──────────────────────────────────
+
+  globalAdvToggle.addEventListener("click", () => {
+    const isHidden = globalAdvPanel.classList.contains("hidden");
+    globalAdvPanel.classList.toggle("hidden");
+    globalAdvChevron.classList.toggle("rotate-90", isHidden);
+  });
+
+  // ── Status / error / success helpers ────────────────────────────────────
+
+  function _setMdGenStatus(msg, pulsing = true) {
+    if (!msg) { mdGenStatus.classList.add("hidden"); return; }
+    mdGenStatus.classList.remove("hidden");
+    mdGenStatus.classList.add("flex");
+    mdGenStatusText.textContent = msg;
+    mdGenStatusDot.classList.toggle("animate-pulse", pulsing);
+  }
+
+  // ── Generate MD Inputs ───────────────────────────────────────────────────
+
+  generateMdBtn.addEventListener("click", async () => {
+    if (!currentRunId) {
+      mdGenErrorText.textContent = "No active run — complete Section 2 first.";
+      mdGenErrorBox.classList.remove("hidden");
+      return;
+    }
+
+    mdGenErrorBox.classList.add("hidden");
+    mdGenSuccessBox.classList.add("hidden");
+    generateMdBtn.disabled = true;
+    _setMdGenStatus("Writing AMBER input files…");
+
+    const payload = {
+      run_id: currentRunId,
+      global_config: {
+        cut:   parseFloat(globalCutInput.value) || 12.0,
+        iwrap: parseInt(globalIwrapInput.value, 10),
+      },
+      stages: stages.map((s) => ({
+        label:              s.label,
+        stage_type:         "minimization",
+        maxcyc:             s.maxcyc,
+        ncyc:               s.ncyc,
+        ntwr:               s.ntwr,
+        ntpr:               s.ntpr,
+        restraint_enabled:  s.restraintEnabled,
+        restraint_wt:       s.restraintWt,
+        restraintmask:      s.restraintMask,
+      })),
+    };
+
+    try {
+      const resp = await fetch("/api/study/md-protocol", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || `Server error ${resp.status}`);
+
+      _setMdGenStatus("Done", false);
+      mdGenStatusDot.style.background = "#4ade80";
+      mdGenSuccessFiles.textContent = data.files.join(", ");
+      mdGenSuccessBox.classList.remove("hidden");
+
+    } catch (err) {
+      mdGenErrorText.textContent = err.message || "Unknown error generating MD inputs.";
+      mdGenErrorBox.classList.remove("hidden");
+      _setMdGenStatus(null);
+    } finally {
+      generateMdBtn.disabled = false;
+    }
+  });
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+  window.HydroMD = {
+    /** Called by HydroStudy after "Confirm Configuration" succeeds. */
+    setRunId,
+    /** Returns the current in-memory stage list (for debugging/testing). */
+    getStages: () => stages,
   };
 
 }());
